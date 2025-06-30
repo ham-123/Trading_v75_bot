@@ -209,7 +209,12 @@ class DerivAPI:
         error = data.get('error', {})
         error_code = error.get('code', 'Inconnu')
         error_message = error.get('message', 'Erreur inconnue')
-        logger.error(f"❌ Erreur API: {error_code} - {error_message}")
+
+        # Ignorer certaines erreurs temporaires
+        if error_code == 'WrongResponse':
+            logger.debug(f"Erreur API temporaire: {error_code} - {error_message}")
+        else:
+            logger.error(f"❌ Erreur API: {error_code} - {error_message}")
 
     def _on_error(self, ws, error):
         """Callback en cas d'erreur WebSocket"""
