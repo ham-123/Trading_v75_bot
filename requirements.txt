@@ -1,0 +1,23 @@
+# Dépendances pour le Bot Trading Vol75
+
+# API et WebSocket
+websocket-client==1.6.4
+requests==2.31.0
+
+# Analyse de données
+pandas==2.1.4
+numpy==1.24.3
+
+# Analyse technique
+ta>=0.10.2
+
+# Machine Learning / IA (XGBoost au lieu de TensorFlow)
+xgboost>=1.7.0
+scikit-learn==1.3.2
+joblib==1.3.2
+
+# Notifications Telegram
+python-telegram-bot==20.7
+
+# Utilitaires
+python-dotenv==1.0.0

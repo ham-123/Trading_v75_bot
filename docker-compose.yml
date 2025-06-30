@@ -1,0 +1,50 @@
+version: '3.8'
+
+services:
+  trading-bot:
+    build: .
+    container_name: vol75_trading_bot
+
+    # Volumes pour persister les données
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+
+    # Charger les variables d'environnement
+    env_file:
+      - .env
+
+    # Politique de redémarrage
+    restart: unless-stopped
+
+    # Configuration réseau (optionnel)
+    networks:
+      - trading_network
+
+    # Monitoring de santé (optionnel)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app/logs/trading_bot.log') else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+    # Limites de ressources
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '0.5'
+        reservations:
+          memory: 512M
+          cpus: '0.25'
+
+# Réseau personnalisé (optionnel)
+networks:
+  trading_network:
+    driver: bridge
+
+# Volumes nommés (optionnel pour backup)
+volumes:
+  bot_data:
+  bot_logs:
