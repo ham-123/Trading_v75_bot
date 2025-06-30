@@ -2,6 +2,7 @@
 """
 Bot Trading Vol75 - Point d'entrée principal
 Orchestration de tous les composants du système de trading automatisé
+Avec chargement de données historiques et notifications de santé
 """
 
 import asyncio
@@ -55,6 +56,7 @@ def setup_logging():
         logging.getLogger('websocket').setLevel(logging.WARNING)
         logging.getLogger('tensorflow').setLevel(logging.ERROR)
         logging.getLogger('urllib3').setLevel(logging.WARNING)
+        logging.getLogger('httpx').setLevel(logging.WARNING)
 
 
 logger = logging.getLogger(__name__)
@@ -71,12 +73,21 @@ class TradingBot:
         self.signal_generator = SignalGenerator()
         self.telegram_bot = TelegramBot()
 
-        # Variables de contrôle
+        # Variables de contrôle trading
         self.last_signal_time = 0
         self.consecutive_losses = 0
         self.daily_trades = 0
         self.last_trade_date = None
         self.running = True
+
+        # Variables de santé et monitoring
+        self.start_time = datetime.now()
+        self.last_health_notification = 0
+        self.health_interval = 3600  # 1 heure en secondes
+        self.signals_today = 0
+        self.last_signal_time_obj = None
+        self.current_price = 0
+        self.historical_data_loaded = False
 
         # Paramètres de configuration
         self.signal_interval = int(os.getenv('SIGNAL_INTERVAL', 3600))  # 1h par défaut
@@ -93,7 +104,7 @@ class TradingBot:
         self.running = False
 
     async def initialize(self):
-        """Initialisation des composants"""
+        """Initialisation des composants avec chargement historique"""
         try:
             logger.info("🚀 Initialisation du bot Vol75...")
 
@@ -105,23 +116,38 @@ class TradingBot:
             await self.deriv_api.connect()
             logger.info("✅ Connexion Deriv API établie")
 
+            # 🆕 CHARGER LES DONNÉES HISTORIQUES RÉELLES
+            logger.info("📊 Chargement des données historiques Vol75...")
+            self.historical_data_loaded = await self.deriv_api.load_historical_on_startup()
+
+            if self.historical_data_loaded:
+                logger.info("✅ Données historiques Vol75 chargées avec succès")
+            else:
+                logger.info("⚠️ Mode collecte temps réel activé")
+
             # Initialiser le modèle IA
             logger.info("🧠 Chargement du modèle IA...")
-            self.ai_model.load_or_create_model()
+            training_success = self.ai_model.load_or_create_model()
             logger.info("✅ Modèle IA prêt")
 
-            # Test de notification Telegram
-            await self.telegram_bot.send_message(
-                "🤖 <b>Bot Vol75 démarré avec succès!</b>\n"
-                f"📊 Mode: {os.getenv('TRADING_MODE', 'demo')}\n"
-                f"💰 Capital: {os.getenv('CAPITAL', 1000)}$\n"
-                f"⚠️ Risque par trade: {os.getenv('RISK_AMOUNT', 10)}$"
-            )
+            # Notification de démarrage améliorée
+            await self.telegram_bot.send_startup_notification(self.historical_data_loaded)
+
+            # Si entraînement réussi avec données historiques, notifier
+            if training_success and self.historical_data_loaded and hasattr(self.ai_model, 'validation_accuracy'):
+                if self.ai_model.validation_accuracy > 0.5:  # Seulement si modèle vraiment entraîné
+                    training_results = {
+                        'accuracy': self.ai_model.validation_accuracy,
+                        'samples': self.ai_model.training_samples,
+                        'features': getattr(self.ai_model, 'n_features', 18)
+                    }
+                    await self.telegram_bot.send_ai_training_notification(training_results)
 
             logger.info("✅ Initialisation terminée avec succès")
 
         except Exception as e:
             logger.error(f"❌ Erreur d'initialisation: {e}")
+            await self.telegram_bot.send_error_alert(str(e), "Initialisation")
             raise
 
     def _check_configuration(self):
@@ -140,7 +166,7 @@ class TradingBot:
         return True
 
     async def run(self):
-        """Boucle principale du bot"""
+        """Boucle principale du bot avec notifications de santé"""
         try:
             await self.initialize()
 
@@ -148,7 +174,14 @@ class TradingBot:
 
             while self.running:
                 try:
-                    # Vérifier l'heure de trading (éviter 22h-6h UTC)
+                    current_time = time.time()
+
+                    # 🆕 NOTIFICATION DE SANTÉ HORAIRE
+                    if current_time - self.last_health_notification >= self.health_interval:
+                        await self.send_health_notification()
+                        self.last_health_notification = current_time
+
+                    # Vérifier les heures de trading (éviter 22h-6h UTC)
                     if not self._is_trading_hours():
                         await asyncio.sleep(300)  # Vérifier toutes les 5 minutes
                         continue
@@ -161,7 +194,7 @@ class TradingBot:
                         await asyncio.sleep(300)
                         continue
 
-                    # Récupérer et analyser les données
+                    # Analyser et traiter les données de marché
                     await self.process_market_data()
 
                     # Attendre avant la prochaine analyse
@@ -175,7 +208,7 @@ class TradingBot:
             logger.info("Arrêt du bot demandé par l'utilisateur")
         except Exception as e:
             logger.error(f"Erreur critique dans run(): {e}")
-            await self.telegram_bot.send_message(f"❌ <b>Erreur critique:</b> {e}")
+            await self.telegram_bot.send_error_alert(str(e), "Système")
         finally:
             await self.cleanup()
 
@@ -189,7 +222,11 @@ class TradingBot:
         """Reset du compteur de trades journaliers"""
         today = datetime.now().date()
         if self.last_trade_date != today:
+            if self.signals_today > 0:  # Log seulement si il y a eu des signaux
+                logger.info(f"📅 Fin de journée - {self.signals_today} signaux générés le {self.last_trade_date}")
+
             self.daily_trades = 0
+            self.signals_today = 0
             self.last_trade_date = today
             logger.info(f"📅 Nouveau jour - Reset compteur trades: {today}")
 
@@ -222,7 +259,10 @@ class TradingBot:
                 logger.debug("Pas assez de données pour l'analyse")
                 return
 
-            logger.debug(f"Analyse de {len(data)} points de données")
+            # Mettre à jour le prix actuel
+            self.current_price = float(data['price'].iloc[-1])
+
+            logger.debug(f"Analyse de {len(data)} points de données (prix actuel: {self.current_price:.5f})")
 
             # Analyse technique
             tech_score = self.technical_analysis.calculate_score(data)
@@ -244,7 +284,7 @@ class TradingBot:
             logger.error(f"Erreur traitement données marché: {e}")
 
     async def process_signal(self, signal):
-        """Traiter et envoyer un signal"""
+        """Traiter et envoyer un signal avec comptage"""
         try:
             logger.info(f"🎯 Signal généré: {signal['direction']} à {signal['entry_price']}")
 
@@ -254,13 +294,15 @@ class TradingBot:
             # Mettre à jour les compteurs
             self.last_signal_time = time.time()
             self.daily_trades += 1
+            self.signals_today += 1
+            self.last_signal_time_obj = datetime.now()
 
             # Sauvegarder le signal
             self._save_signal(signal)
 
             # Log détaillé
             logger.info(
-                f"📊 Signal envoyé - Direction: {signal['direction']}, "
+                f"📊 Signal #{self.signals_today} envoyé - Direction: {signal['direction']}, "
                 f"Score: {signal['combined_score']}, "
                 f"Trades aujourd'hui: {self.daily_trades}"
             )
@@ -289,16 +331,79 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Erreur sauvegarde signal: {e}")
 
+    async def send_health_notification(self):
+        """Envoyer la notification de santé horaire"""
+        try:
+            # Récupérer les données actuelles
+            data = await self.deriv_api.get_latest_data()
+            price_change_1h = 0
+
+            if data is not None and len(data) > 0:
+                self.current_price = float(data['price'].iloc[-1])
+
+                # Calculer variation 1h (approximative)
+                if len(data) >= 12:  # Au moins 1h de données (5min intervals)
+                    price_1h_ago = float(data['price'].iloc[-13])  # 12*5min = 1h
+                    price_change_1h = ((self.current_price - price_1h_ago) / price_1h_ago) * 100
+
+            # Préparer les stats du bot
+            uptime = (datetime.now() - self.start_time).total_seconds() / 3600
+
+            # Déterminer le mode IA
+            ai_mode = "Mode Simple"
+            ai_accuracy = 0
+            if hasattr(self.ai_model, 'model') and self.ai_model.model is not None:
+                ai_mode = "XGBoost Actif"
+                ai_accuracy = getattr(self.ai_model, 'validation_accuracy', 0)
+
+            bot_stats = {
+                'connected': self.deriv_api.connected,
+                'uptime_hours': uptime,
+                'data_points': len(self.deriv_api.data_buffer),
+                'ai_mode': ai_mode,
+                'ai_accuracy': ai_accuracy,
+                'signals_today': self.signals_today,
+                'last_signal_time': self.last_signal_time_obj,
+                'current_price': self.current_price,
+                'price_change_1h': price_change_1h,
+                'trading_mode': os.getenv('TRADING_MODE', 'demo')
+            }
+
+            # Envoyer la notification
+            success = await self.telegram_bot.send_health_notification(bot_stats)
+            if success:
+                logger.info("📱 Notification de santé envoyée")
+            else:
+                logger.warning("⚠️ Échec envoi notification de santé")
+
+        except Exception as e:
+            logger.error(f"Erreur notification santé: {e}")
+
     async def cleanup(self):
         """Nettoyage avant arrêt"""
         try:
             logger.info("🧹 Nettoyage avant arrêt...")
 
+            # Envoyer statistiques finales
+            if self.signals_today > 0:
+                uptime = (datetime.now() - self.start_time).total_seconds() / 3600
+                final_stats = f"""
+🛑 <b>Bot Vol75 arrêté</b>
+
+📊 <b>Session terminée:</b>
+• Durée: {uptime:.1f}h
+• Signaux générés: {self.signals_today}
+• Dernier prix: {self.current_price:.5f}
+• Messages Telegram: {self.telegram_bot.messages_sent}
+
+🕐 <i>Arrêté le {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')}</i>
+"""
+                await self.telegram_bot.send_message(final_stats)
+            else:
+                await self.telegram_bot.send_shutdown_message()
+
             # Fermer la connexion Deriv
             await self.deriv_api.disconnect()
-
-            # Message d'arrêt
-            await self.telegram_bot.send_message("🛑 <b>Bot Vol75 arrêté</b>")
 
             logger.info("✅ Nettoyage terminé")
 
@@ -311,9 +416,10 @@ def main():
     # Configuration des logs
     setup_logging()
 
-    logger.info("=" * 50)
+    logger.info("=" * 60)
     logger.info("BOT TRADING VOL75 - DÉMARRAGE")
-    logger.info("=" * 50)
+    logger.info("Version: 2.0 avec IA XGBoost et données historiques")
+    logger.info("=" * 60)
 
     # Créer et lancer le bot
     bot = TradingBot()
@@ -326,7 +432,9 @@ def main():
         logger.error(f"Erreur fatale: {e}")
         sys.exit(1)
     finally:
-        logger.info("Bot arrêté")
+        logger.info("=" * 60)
+        logger.info("BOT TRADING VOL75 - ARRÊTÉ")
+        logger.info("=" * 60)
 
 
 if __name__ == "__main__":

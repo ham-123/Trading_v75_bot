@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Deriv API - Gestion de la connexion WebSocket et collecte de données Vol75
-Connexion temps réel, auto-reconnexion, sauvegarde CSV
+Connexion temps réel, auto-reconnexion, sauvegarde CSV, données historiques
 """
 
 import websocket
@@ -46,6 +46,11 @@ class DerivAPI:
         # Statistiques
         self.messages_received = 0
         self.last_tick_time = None
+
+        # Variables pour données historiques
+        self.historical_data = []
+        self.historical_complete = False
+        self.historical_error = None
 
         # Fichier de sauvegarde
         self.csv_file = 'data/vol75_data.csv'
@@ -146,6 +151,8 @@ class DerivAPI:
                 self._handle_tick_data(data)
             elif 'subscription' in data:
                 self._handle_subscription_response(data)
+            elif 'history' in data:
+                self._handle_historical_response(data)
             elif 'error' in data:
                 self._handle_error_response(data)
 
@@ -204,6 +211,35 @@ class DerivAPI:
         else:
             logger.warning("❌ Échec d'abonnement")
 
+    def _handle_historical_response(self, data):
+        """Traiter la réponse de données historiques"""
+        try:
+            if 'history' in data:
+                history = data['history']
+                prices = history.get('prices', [])
+                times = history.get('times', [])
+
+                logger.info(f"📈 Traitement de {len(prices)} points historiques...")
+
+                # Convertir en format standard
+                for timestamp, price in zip(times, prices):
+                    tick_data = {
+                        'timestamp': datetime.fromtimestamp(timestamp, tz=timezone.utc),
+                        'price': float(price),
+                        'symbol': 'R_75',
+                        'pip_size': 0.00001,
+                        'epoch': timestamp
+                    }
+                    self.historical_data.append(tick_data)
+
+                logger.info(f"✅ {len(self.historical_data)} points historiques Vol75 récupérés")
+                self.historical_complete = True
+
+        except Exception as e:
+            logger.error(f"Erreur traitement réponse historique: {e}")
+            self.historical_error = str(e)
+            self.historical_complete = True
+
     def _handle_error_response(self, data):
         """Traiter les messages d'erreur"""
         error = data.get('error', {})
@@ -251,6 +287,132 @@ class DerivAPI:
                 logger.error(f"Erreur reconnexion: {e}")
 
         threading.Thread(target=reconnect, daemon=True).start()
+
+    def get_historical_data(self, days_back=30):
+        """Récupérer les données historiques Vol75 réelles via API"""
+        try:
+            logger.info(f"📊 Récupération données historiques Vol75 ({days_back} jours)...")
+
+            # Calculer les timestamps
+            end_time = int(time.time())
+            start_time = int(end_time - (days_back * 24 * 60 * 60))
+
+            # Préparer la requête historique
+            history_request = {
+                "ticks_history": "R_75",
+                "start": start_time,
+                "end": end_time,
+                "style": "ticks",
+                "count": 5000,  # Maximum Deriv API
+                "req_id": int(time.time() * 1000)  # ID unique
+            }
+
+            # Réinitialiser les variables
+            self.historical_data = []
+            self.historical_complete = False
+            self.historical_error = None
+
+            # Envoyer la requête
+            self.ws.send(json.dumps(history_request))
+            logger.info("📡 Requête données historiques envoyée...")
+
+            # Attendre la réponse (max 60 secondes)
+            wait_time = 0
+            while not self.historical_complete and wait_time < 60:
+                time.sleep(0.5)
+                wait_time += 0.5
+
+            # Traitement des résultats
+            if self.historical_error:
+                logger.error(f"❌ Échec récupération historique: {self.historical_error}")
+                return None
+
+            if not self.historical_data:
+                logger.warning("⚠️ Aucune donnée historique reçue")
+                return None
+
+            # Sauvegarder en CSV
+            df_historical = pd.DataFrame(self.historical_data)
+            df_historical = df_historical.sort_values('timestamp').reset_index(drop=True)
+
+            # Sauvegarder dans le fichier principal
+            df_historical.to_csv(self.csv_file, index=False)
+            logger.info(f"💾 {len(df_historical)} points sauvegardés dans {self.csv_file}")
+
+            return df_historical
+
+        except Exception as e:
+            logger.error(f"❌ Erreur critique récupération historique: {e}")
+            return None
+
+    async def load_historical_on_startup(self):
+        """Charger les données historiques au démarrage"""
+        try:
+            # Vérifier si on a déjà des données récentes
+            if os.path.exists(self.csv_file):
+                try:
+                    df_existing = pd.read_csv(self.csv_file)
+                    if len(df_existing) > 1000:
+                        df_existing['timestamp'] = pd.to_datetime(df_existing['timestamp'])
+                        last_date = df_existing['timestamp'].max()
+
+                        # Calculer l'âge des données
+                        if hasattr(last_date, 'tz_localize'):
+                            last_date = last_date.tz_localize('UTC')
+                        elif last_date.tzinfo is None:
+                            last_date = last_date.replace(tzinfo=timezone.utc)
+
+                        hours_ago = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
+
+                        if hours_ago < 2:  # Données de moins de 2h
+                            logger.info(
+                                f"✅ Données récentes trouvées: {len(df_existing)} points (dernière: {hours_ago:.1f}h)")
+                            # Charger dans le buffer
+                            for _, row in df_existing.tail(self.max_buffer_size).iterrows():
+                                tick_data = {
+                                    'timestamp': pd.to_datetime(row['timestamp']),
+                                    'price': float(row['price']),
+                                    'symbol': row.get('symbol', 'R_75'),
+                                    'pip_size': row.get('pip_size', 0.00001),
+                                    'epoch': row.get('epoch', 0)
+                                }
+                                self.data_buffer.append(tick_data)
+                            return True
+                except Exception as e:
+                    logger.warning(f"Erreur lecture fichier existant: {e}")
+
+            # Attendre que la connexion soit stable
+            await asyncio.sleep(2)
+
+            if not self.connected:
+                logger.warning("⚠️ Connexion non établie, impossible de récupérer l'historique")
+                return False
+
+            # Récupérer de nouvelles données historiques
+            logger.info("🔄 Récupération de nouvelles données historiques Vol75...")
+            historical_df = self.get_historical_data(days_back=30)  # 1 mois de données
+
+            if historical_df is not None and len(historical_df) > 100:
+                # Charger dans le buffer
+                for _, row in historical_df.tail(self.max_buffer_size).iterrows():
+                    tick_data = {
+                        'timestamp': row['timestamp'],
+                        'price': float(row['price']),
+                        'symbol': row.get('symbol', 'R_75'),
+                        'pip_size': row.get('pip_size', 0.00001),
+                        'epoch': row.get('epoch', 0)
+                    }
+                    self.data_buffer.append(tick_data)
+
+                logger.info(f"✅ {len(historical_df)} points historiques chargés et prêts pour l'IA")
+                return True
+            else:
+                logger.warning("⚠️ Échec récupération historique, passage en mode temps réel")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Erreur chargement historique: {e}")
+            return False
 
     async def get_latest_data(self, count: int = 200) -> Optional[pd.DataFrame]:
         """Récupérer les dernières données sous forme de DataFrame"""
@@ -365,6 +527,10 @@ if __name__ == "__main__":
 
         try:
             await api.connect()
+
+            # Test chargement historique
+            historical_loaded = await api.load_historical_on_startup()
+            print(f"Données historiques chargées: {historical_loaded}")
 
             # Attendre quelques données
             for i in range(10):

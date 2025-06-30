@@ -316,6 +316,126 @@ Score: {signal.get('combined_score', 0):.0f}/100
 """
         return await self.send_message(health_msg)
 
+    async def send_health_notification(self, bot_stats: Dict) -> bool:
+        """Envoyer une notification de santé toutes les heures"""
+        try:
+            current_time = datetime.now().strftime('%H:%M:%S')
+            current_date = datetime.now().strftime('%d/%m/%Y')
+
+            # Calculer l'uptime
+            uptime_hours = bot_stats.get('uptime_hours', 0)
+            uptime_str = f"{uptime_hours:.1f}h" if uptime_hours < 24 else f"{uptime_hours / 24:.1f}j"
+
+            # Statut de connexion
+            connection_status = "🟢 Connecté" if bot_stats.get('connected', False) else "🔴 Déconnecté"
+
+            # Données collectées
+            data_points = bot_stats.get('data_points', 0)
+            data_status = "📊 Suffisamment" if data_points > 1000 else f"📈 Collecte ({data_points})"
+
+            # IA Status
+            ai_mode = bot_stats.get('ai_mode', 'Initialisation')
+            ai_accuracy = bot_stats.get('ai_accuracy', 0) * 100
+            ai_status = f"🧠 {ai_mode}" + (f" ({ai_accuracy:.0f}%)" if ai_accuracy > 0 else "")
+
+            # Signaux générés
+            signals_today = bot_stats.get('signals_today', 0)
+            last_signal = bot_stats.get('last_signal_time', None)
+            last_signal_str = last_signal.strftime('%H:%M') if last_signal else "Aucun"
+
+            # Prix actuel
+            current_price = bot_stats.get('current_price', 0)
+            price_change = bot_stats.get('price_change_1h', 0)
+            price_emoji = "📈" if price_change > 0 else "📉" if price_change < 0 else "➡️"
+
+            message = f"""
+💚 <b>BOT VOL75 - RAPPORT HORAIRE</b>
+
+🕐 <b>{current_time}</b> • {current_date}
+
+📊 <b>Statut Système:</b>
+{connection_status} • Uptime: {uptime_str}
+{data_status} • {ai_status}
+
+📈 <b>Vol75 Actuel:</b>
+{price_emoji} Prix: <code>{current_price:.5f}</code>
+{price_emoji} Var 1h: {price_change:+.3f}%
+
+🎯 <b>Trading:</b>
+• Signaux aujourd'hui: {signals_today}
+• Dernier signal: {last_signal_str}
+• Mode: {bot_stats.get('trading_mode', 'demo').upper()}
+
+🔧 <b>Performance:</b>
+• Messages Telegram: {self.messages_sent}
+• Taux succès: {self.get_success_rate():.0f}%
+
+<i>📡 Bot actif et surveillant le marché...</i>
+"""
+
+            return await self.send_message(message)
+
+        except Exception as e:
+            logger.error(f"Erreur notification santé: {e}")
+            return False
+
+    def get_success_rate(self) -> float:
+        """Calculer le taux de succès des messages"""
+        total = self.messages_sent + self.errors_count
+        if total == 0:
+            return 100.0
+        return (self.messages_sent / total) * 100
+
+    async def send_startup_notification(self, historical_loaded: bool = False) -> bool:
+        """Notification améliorée de démarrage"""
+        startup_msg = f"""
+🚀 <b>BOT VOL75 TRADING - DÉMARRÉ</b>
+
+🔧 <b>Configuration:</b>
+• Mode: {os.getenv('TRADING_MODE', 'demo').upper()}
+• Capital: {os.getenv('CAPITAL', 1000)}$
+• Risque/trade: {os.getenv('RISK_AMOUNT', 10)}$
+• Ratio R:R: 1:{os.getenv('RISK_REWARD_RATIO', 3)}
+
+📊 <b>Critères signaux:</b>
+• Score technique min: {os.getenv('MIN_TECH_SCORE', 70)}/100
+• Confiance IA min: {float(os.getenv('MIN_AI_CONFIDENCE', 0.75)) * 100:.0f}%
+
+📈 <b>Données:</b>
+{'✅ Historiques Vol75 chargées' if historical_loaded else '🔄 Collecte temps réel active'}
+
+🕐 <i>Démarré le {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')}</i>
+
+✅ <b>Bot actif - Surveillance Vol75 en cours...</b>
+🔔 <i>Rapport automatique toutes les heures</i>
+"""
+        return await self.send_message(startup_msg)
+
+    async def send_ai_training_notification(self, training_results: Dict) -> bool:
+        """Notification d'entraînement IA"""
+        accuracy = training_results.get('accuracy', 0) * 100
+        samples = training_results.get('samples', 0)
+        features = training_results.get('features', 0)
+
+        training_msg = f"""
+🧠 <b>IA VOL75 - ENTRAÎNEMENT TERMINÉ</b>
+
+✅ <b>Modèle XGBoost prêt!</b>
+
+📊 <b>Performance:</b>
+• Précision: {accuracy:.1f}%
+• Échantillons: {samples:,}
+• Features: {features}
+
+🎯 <b>Capacités:</b>
+• Prédiction UP/DOWN
+• Score de confiance
+• Analyse 18 indicateurs techniques
+
+🚀 <b>Le bot peut maintenant générer des signaux de qualité!</b>
+"""
+        return await self.send_message(training_msg)
+
     async def test_connection(self) -> bool:
         """Tester la connexion Telegram"""
         try:
@@ -363,7 +483,6 @@ if __name__ == "__main__":
     load_dotenv()
     logging.basicConfig(level=logging.INFO)
 
-
     async def test_telegram_bot():
         """Test du bot Telegram"""
         bot = TelegramBot()
@@ -377,53 +496,5 @@ if __name__ == "__main__":
         # Test de connexion
         success = await bot.test_connection()
         print(f"Test connexion: {'✅' if success else '❌'}")
-
-        # Test signal
-        test_signal = {
-            'direction': 'BUY',
-            'entry_price': 1234.56,
-            'stop_loss': 1224.56,
-            'take_profit': 1264.56,
-            'tech_score': 78,
-            'ai_confidence': 0.85,
-            'ai_direction': 'UP',
-            'combined_score': 82.5,
-            'actual_ratio': 3.0,
-            'stop_loss_pct': 0.81,
-            'take_profit_pct': 2.43,
-            'market_conditions': {
-                'trend': 'uptrend',
-                'volatility': 'normal',
-                'price_change_5min': 0.12,
-                'price_change_1h': 0.45
-            }
-        }
-
-        print("📤 Envoi d'un signal test...")
-        signal_success = await bot.send_signal(test_signal)
-        print(f"Signal envoyé: {'✅' if signal_success else '❌'}")
-
-        # Test résumé quotidien
-        test_stats = {
-            'total_signals': 5,
-            'buy_signals': 3,
-            'sell_signals': 2,
-            'avg_score': 76.4,
-            'avg_ai_confidence': 0.78,
-            'win_rate': 0.6,
-            'total_risk': 50,
-            'potential_profit': 150,
-            'realized_pnl': 25,
-            'uptime_hours': 8.5
-        }
-
-        print("📊 Envoi d'un résumé test...")
-        summary_success = await bot.send_daily_summary(test_stats)
-        print(f"Résumé envoyé: {'✅' if summary_success else '❌'}")
-
-        # Statistiques
-        stats = bot.get_stats()
-        print(f"📈 Statistiques: {stats}")
-
 
     asyncio.run(test_telegram_bot())
