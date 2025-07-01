@@ -1,4 +1,5 @@
-# Dépendances pour le Bot Trading Vol75 - ENSEMBLE IA
+
+# Dépendances pour le Bot Trading Vol75 - ENSEMBLE IA + Dashboard
 
 # API et WebSocket
 websocket-client==1.6.4
@@ -22,3 +23,6 @@ python-telegram-bot==20.7
 
 # Utilitaires
 python-dotenv==1.0.0
+
+# 🆕 Dashboard Integration
+requests>=2.31.0  # Pour envoyer data à l'API

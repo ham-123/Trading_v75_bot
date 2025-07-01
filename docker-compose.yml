@@ -1,6 +1,7 @@
 version: '3.8'
 
 services:
+  # Bot de trading principal (EXISTANT - légèrement modifié)
   trading-bot:
     build: .
     container_name: vol75_trading_bot
@@ -17,13 +18,17 @@ services:
     # Politique de redémarrage
     restart: unless-stopped
 
-    # Configuration réseau (optionnel)
+    # Configuration réseau
     networks:
       - trading_network
 
-    # Monitoring de santé (optionnel)
+    # Dépend de Redis pour le dashboard
+    depends_on:
+      - redis
+
+    # Monitoring de santé (corrigé le nom du log)
     healthcheck:
-      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app/logs/trading_bot.log') else 1)"]
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app/logs/trading_bot_mtf_optimized.log') else 1)"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -39,12 +44,81 @@ services:
           memory: 512M
           cpus: '0.25'
 
-# Réseau personnalisé (optionnel)
+  # 🆕 API Dashboard Backend
+  dashboard-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dashboard
+    container_name: vol75_dashboard_api
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      - REDIS_HOST=redis
+    restart: unless-stopped
+    networks:
+      - trading_network
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 🆕 Interface Streamlit Frontend
+  dashboard-app:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit
+    container_name: vol75_dashboard_app
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    environment:
+      - API_BASE_URL=http://dashboard-api:8000
+    restart: unless-stopped
+    networks:
+      - trading_network
+    depends_on:
+      - dashboard-api
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 🆕 Redis pour cache temps réel
+  redis:
+    image: redis:7-alpine
+    container_name: vol75_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - trading_network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# Réseau personnalisé (EXISTANT)
 networks:
   trading_network:
     driver: bridge
 
-# Volumes nommés (optionnel pour backup)
+# Volumes (EXISTANT + Redis)
 volumes:
-  bot_data:
-  bot_logs:
+  redis_data:    # 🆕 Pour Redis
+  bot_data:      # EXISTANT
+  bot_logs:      # EXISTANT

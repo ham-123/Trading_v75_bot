@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Deriv API - Gestion de la connexion WebSocket et collecte de données Vol75
-Connexion temps réel, auto-reconnexion, sauvegarde CSV, données historiques
+CORRECTION: Ajout des colonnes high, low, volume manquantes
 """
 
 import websocket
@@ -37,6 +37,10 @@ class DerivAPI:
         self.data_buffer: List[Dict] = []
         self.max_buffer_size = 1000
 
+        # 🆕 NOUVEAU: Buffer pour calculer high/low sur periode
+        self.tick_buffer: List[Dict] = []  # Buffer pour les ticks bruts
+        self.candle_interval = 300  # 5 minutes en secondes
+
         # État de connexion
         self.connected = False
         self.authenticated = False
@@ -55,6 +59,220 @@ class DerivAPI:
         # Fichier de sauvegarde
         self.csv_file = 'data/vol75_data.csv'
         os.makedirs('data', exist_ok=True)
+
+    def _handle_tick_data(self, data):
+        """Traitement des données de tick reçues - CORRIGÉ"""
+        try:
+            tick = data['tick']
+
+            # 🆕 NOUVEAU: Créer l'objet tick avec toutes les colonnes nécessaires
+            current_time = datetime.fromtimestamp(tick['epoch'], tz=timezone.utc)
+            price = float(tick['quote'])
+
+            # Ajouter au buffer de ticks bruts
+            tick_raw = {
+                'timestamp': current_time,
+                'price': price,
+                'epoch': tick['epoch']
+            }
+            self.tick_buffer.append(tick_raw)
+
+            # 🆕 CRÉATION DES DONNÉES OHLCV (Open, High, Low, Close, Volume)
+            tick_data = self._create_ohlcv_data(current_time, price, tick)
+
+            if tick_data:
+                # Ajouter au buffer principal
+                self.data_buffer.append(tick_data)
+                self.messages_received += 1
+                self.last_tick_time = current_time
+
+                # Maintenir la taille du buffer
+                if len(self.data_buffer) > self.max_buffer_size:
+                    self.data_buffer = self.data_buffer[-self.max_buffer_size:]
+
+                # Log périodique
+                if self.messages_received % 100 == 0:
+                    logger.debug(f"📈 {self.messages_received} ticks reçus, prix actuel: {price}")
+
+                # Sauvegarder périodiquement (toutes les 50 ticks)
+                if len(self.data_buffer) % 50 == 0:
+                    self._save_to_csv()
+
+        except Exception as e:
+            logger.error(f"Erreur traitement tick: {e}")
+
+    def _create_ohlcv_data(self, timestamp: datetime, price: float, tick_raw: dict) -> Optional[Dict]:
+        """🆕 NOUVEAU: Créer les données OHLCV à partir des ticks"""
+        try:
+            # Nettoyer le buffer des ticks trop anciens (garder 1 heure)
+            cutoff_time = timestamp.timestamp() - 3600  # 1 heure
+            self.tick_buffer = [t for t in self.tick_buffer if t['timestamp'].timestamp() > cutoff_time]
+
+            # Calculer high/low sur les derniers 15 ticks (approximativement 5 minutes)
+            recent_ticks = self.tick_buffer[-15:] if len(self.tick_buffer) >= 15 else self.tick_buffer
+
+            if not recent_ticks:
+                recent_prices = [price]
+            else:
+                recent_prices = [t['price'] for t in recent_ticks]
+
+            # Créer les données OHLCV
+            tick_data = {
+                'timestamp': timestamp,
+                'price': price,  # Close price
+                'open': recent_prices[0] if recent_prices else price,  # Premier prix de la période
+                'high': max(recent_prices) if recent_prices else price,  # Plus haut
+                'low': min(recent_prices) if recent_prices else price,  # Plus bas
+                'close': price,  # Prix de clôture (identique à price)
+                'volume': 1000 + (len(recent_prices) * 50),  # Volume simulé basé sur l'activité
+                'symbol': tick_raw.get('symbol', 'R_75'),
+                'pip_size': tick_raw.get('pip_size', 0.00001),
+                'epoch': tick_raw.get('epoch', 0)
+            }
+
+            return tick_data
+
+        except Exception as e:
+            logger.error(f"Erreur création OHLCV: {e}")
+            return None
+
+    def _handle_historical_response(self, data):
+        """Traiter la réponse de données historiques - CORRIGÉ"""
+        try:
+            if 'history' in data:
+                history = data['history']
+                prices = history.get('prices', [])
+                times = history.get('times', [])
+
+                logger.info(f"📈 Traitement de {len(prices)} points historiques...")
+
+                # 🆕 NOUVEAU: Convertir en format OHLCV pour les données historiques
+                for i, (timestamp, price) in enumerate(zip(times, prices)):
+                    # Simuler high/low en utilisant une petite variation du prix
+                    price_float = float(price)
+                    variation = price_float * 0.001  # 0.1% de variation
+
+                    tick_data = {
+                        'timestamp': datetime.fromtimestamp(timestamp, tz=timezone.utc),
+                        'price': price_float,
+                        'open': price_float,  # Pour les données historiques, on approxime
+                        'high': price_float + variation,
+                        'low': price_float - variation,
+                        'close': price_float,
+                        'volume': 1000,  # Volume simulé constant
+                        'symbol': 'R_75',
+                        'pip_size': 0.00001,
+                        'epoch': timestamp
+                    }
+                    self.historical_data.append(tick_data)
+
+                logger.info(f"✅ {len(self.historical_data)} points historiques Vol75 récupérés")
+                self.historical_complete = True
+
+        except Exception as e:
+            logger.error(f"Erreur traitement réponse historique: {e}")
+            self.historical_error = str(e)
+            self.historical_complete = True
+
+    async def load_historical_on_startup(self):
+        """Charger les données historiques au démarrage - CORRIGÉ"""
+        try:
+            # Vérifier si on a déjà des données récentes
+            if os.path.exists(self.csv_file):
+                try:
+                    df_existing = pd.read_csv(self.csv_file)
+                    if len(df_existing) > 1000:
+                        df_existing['timestamp'] = pd.to_datetime(df_existing['timestamp'])
+
+                        # 🆕 CORRECTION: Gérer correctement les timezones
+                        last_date = df_existing['timestamp'].max()
+                        if last_date.tzinfo is None:
+                            last_date = last_date.replace(tzinfo=timezone.utc)
+                        elif hasattr(last_date, 'tz_localize'):
+                            try:
+                                last_date = last_date.tz_convert('UTC')
+                            except:
+                                last_date = last_date.replace(tzinfo=timezone.utc)
+
+                        hours_ago = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
+
+                        if hours_ago < 2:  # Données de moins de 2h
+                            logger.info(
+                                f"✅ Données récentes trouvées: {len(df_existing)} points (dernière: {hours_ago:.1f}h)")
+
+                            # 🆕 NOUVEAU: Charger dans le buffer avec toutes les colonnes
+                            for _, row in df_existing.tail(self.max_buffer_size).iterrows():
+                                tick_data = {
+                                    'timestamp': pd.to_datetime(row['timestamp']),
+                                    'price': float(row['price']),
+                                    'open': float(row.get('open', row['price'])),
+                                    'high': float(row.get('high', row['price'])),
+                                    'low': float(row.get('low', row['price'])),
+                                    'close': float(row.get('close', row['price'])),
+                                    'volume': float(row.get('volume', 1000)),
+                                    'symbol': row.get('symbol', 'R_75'),
+                                    'pip_size': row.get('pip_size', 0.00001),
+                                    'epoch': row.get('epoch', 0)
+                                }
+                                self.data_buffer.append(tick_data)
+                            return True
+
+                except Exception as e:
+                    logger.warning(f"Erreur lecture fichier existant: {e}")
+
+            # Attendre que la connexion soit stable
+            await asyncio.sleep(2)
+
+            if not self.connected:
+                logger.warning("⚠️ Connexion non établie, impossible de récupérer l'historique")
+                return False
+
+            # Récupérer de nouvelles données historiques
+            logger.info("🔄 Récupération de nouvelles données historiques Vol75...")
+            historical_df = self.get_historical_data(days_back=30)
+
+            if historical_df is not None and len(historical_df) > 100:
+                # Charger dans le buffer
+                for _, row in historical_df.tail(self.max_buffer_size).iterrows():
+                    tick_data = {
+                        'timestamp': row['timestamp'],
+                        'price': float(row['price']),
+                        'open': float(row.get('open', row['price'])),
+                        'high': float(row.get('high', row['price'])),
+                        'low': float(row.get('low', row['price'])),
+                        'close': float(row.get('close', row['price'])),
+                        'volume': float(row.get('volume', 1000)),
+                        'symbol': row.get('symbol', 'R_75'),
+                        'pip_size': row.get('pip_size', 0.00001),
+                        'epoch': row.get('epoch', 0)
+                    }
+                    self.data_buffer.append(tick_data)
+
+                logger.info(f"✅ {len(historical_df)} points historiques chargés et prêts pour l'IA")
+                return True
+            else:
+                logger.warning("⚠️ Échec récupération historique, passage en mode temps réel")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ Erreur chargement historique: {e}")
+            return False
+
+    # 🆕 NOUVEAU: Méthodes utilitaires pour les autres modules
+    def get_connection_status(self) -> Dict:
+        """Obtenir le statut de connexion"""
+        return {
+            'connected': self.connected,
+            'authenticated': self.authenticated,
+            'messages_received': self.messages_received,
+            'buffer_size': len(self.data_buffer),
+            'tick_buffer_size': len(self.tick_buffer),
+            'last_tick': self.last_tick_time.isoformat() if self.last_tick_time else None,
+            'reconnect_attempts': self.reconnect_attempts
+        }
+
+    # ✅ Le reste des méthodes reste identique...
+    # (connect, disconnect, _save_to_csv, etc. - pas de changements nécessaires)
 
     async def connect(self):
         """Établir la connexion WebSocket"""
@@ -169,40 +387,6 @@ class DerivAPI:
         else:
             logger.warning("❌ Échec d'authentification")
 
-    def _handle_tick_data(self, data):
-        """Traiter les données de tick reçues"""
-        try:
-            tick = data['tick']
-
-            # Créer l'objet tick
-            tick_data = {
-                'timestamp': datetime.fromtimestamp(tick['epoch'], tz=timezone.utc),
-                'price': float(tick['quote']),
-                'symbol': tick['symbol'],
-                'pip_size': tick.get('pip_size', 0.00001),
-                'epoch': tick['epoch']
-            }
-
-            # Ajouter au buffer
-            self.data_buffer.append(tick_data)
-            self.messages_received += 1
-            self.last_tick_time = datetime.now(timezone.utc)
-
-            # Maintenir la taille du buffer
-            if len(self.data_buffer) > self.max_buffer_size:
-                self.data_buffer = self.data_buffer[-self.max_buffer_size:]
-
-            # Log périodique
-            if self.messages_received % 100 == 0:
-                logger.debug(f"📈 {self.messages_received} ticks reçus, prix actuel: {tick_data['price']}")
-
-            # Sauvegarder périodiquement (toutes les 50 ticks)
-            if len(self.data_buffer) % 50 == 0:
-                self._save_to_csv()
-
-        except Exception as e:
-            logger.error(f"Erreur traitement tick: {e}")
-
     def _handle_subscription_response(self, data):
         """Traiter la réponse d'abonnement"""
         subscription = data.get('subscription', {})
@@ -210,35 +394,6 @@ class DerivAPI:
             logger.info(f"✅ Abonnement confirmé: {subscription['id']}")
         else:
             logger.warning("❌ Échec d'abonnement")
-
-    def _handle_historical_response(self, data):
-        """Traiter la réponse de données historiques"""
-        try:
-            if 'history' in data:
-                history = data['history']
-                prices = history.get('prices', [])
-                times = history.get('times', [])
-
-                logger.info(f"📈 Traitement de {len(prices)} points historiques...")
-
-                # Convertir en format standard
-                for timestamp, price in zip(times, prices):
-                    tick_data = {
-                        'timestamp': datetime.fromtimestamp(timestamp, tz=timezone.utc),
-                        'price': float(price),
-                        'symbol': 'R_75',
-                        'pip_size': 0.00001,
-                        'epoch': timestamp
-                    }
-                    self.historical_data.append(tick_data)
-
-                logger.info(f"✅ {len(self.historical_data)} points historiques Vol75 récupérés")
-                self.historical_complete = True
-
-        except Exception as e:
-            logger.error(f"Erreur traitement réponse historique: {e}")
-            self.historical_error = str(e)
-            self.historical_complete = True
 
     def _handle_error_response(self, data):
         """Traiter les messages d'erreur"""
@@ -345,75 +500,6 @@ class DerivAPI:
             logger.error(f"❌ Erreur critique récupération historique: {e}")
             return None
 
-    async def load_historical_on_startup(self):
-        """Charger les données historiques au démarrage"""
-        try:
-            # Vérifier si on a déjà des données récentes
-            if os.path.exists(self.csv_file):
-                try:
-                    df_existing = pd.read_csv(self.csv_file)
-                    if len(df_existing) > 1000:
-                        df_existing['timestamp'] = pd.to_datetime(df_existing['timestamp'])
-                        last_date = df_existing['timestamp'].max()
-
-                        # Calculer l'âge des données
-                        if hasattr(last_date, 'tz_localize'):
-                            last_date = last_date.tz_localize('UTC')
-                        elif last_date.tzinfo is None:
-                            last_date = last_date.replace(tzinfo=timezone.utc)
-
-                        hours_ago = (datetime.now(timezone.utc) - last_date).total_seconds() / 3600
-
-                        if hours_ago < 2:  # Données de moins de 2h
-                            logger.info(
-                                f"✅ Données récentes trouvées: {len(df_existing)} points (dernière: {hours_ago:.1f}h)")
-                            # Charger dans le buffer
-                            for _, row in df_existing.tail(self.max_buffer_size).iterrows():
-                                tick_data = {
-                                    'timestamp': pd.to_datetime(row['timestamp']),
-                                    'price': float(row['price']),
-                                    'symbol': row.get('symbol', 'R_75'),
-                                    'pip_size': row.get('pip_size', 0.00001),
-                                    'epoch': row.get('epoch', 0)
-                                }
-                                self.data_buffer.append(tick_data)
-                            return True
-                except Exception as e:
-                    logger.warning(f"Erreur lecture fichier existant: {e}")
-
-            # Attendre que la connexion soit stable
-            await asyncio.sleep(2)
-
-            if not self.connected:
-                logger.warning("⚠️ Connexion non établie, impossible de récupérer l'historique")
-                return False
-
-            # Récupérer de nouvelles données historiques
-            logger.info("🔄 Récupération de nouvelles données historiques Vol75...")
-            historical_df = self.get_historical_data(days_back=30)  # 1 mois de données
-
-            if historical_df is not None and len(historical_df) > 100:
-                # Charger dans le buffer
-                for _, row in historical_df.tail(self.max_buffer_size).iterrows():
-                    tick_data = {
-                        'timestamp': row['timestamp'],
-                        'price': float(row['price']),
-                        'symbol': row.get('symbol', 'R_75'),
-                        'pip_size': row.get('pip_size', 0.00001),
-                        'epoch': row.get('epoch', 0)
-                    }
-                    self.data_buffer.append(tick_data)
-
-                logger.info(f"✅ {len(historical_df)} points historiques chargés et prêts pour l'IA")
-                return True
-            else:
-                logger.warning("⚠️ Échec récupération historique, passage en mode temps réel")
-                return False
-
-        except Exception as e:
-            logger.error(f"❌ Erreur chargement historique: {e}")
-            return False
-
     async def get_latest_data(self, count: int = 200) -> Optional[pd.DataFrame]:
         """Récupérer les dernières données sous forme de DataFrame"""
         try:
@@ -430,6 +516,9 @@ class DerivAPI:
             # S'assurer que les colonnes sont dans le bon type
             df['timestamp'] = pd.to_datetime(df['timestamp'])
             df['price'] = df['price'].astype(float)
+            df['high'] = df['high'].astype(float)
+            df['low'] = df['low'].astype(float)
+            df['volume'] = df['volume'].astype(float)
 
             # Trier par timestamp
             df = df.sort_values('timestamp').reset_index(drop=True)
@@ -441,7 +530,7 @@ class DerivAPI:
             return None
 
     def _save_to_csv(self):
-        """Sauvegarder les données en CSV"""
+        """Sauvegarder les données en CSV - CORRIGÉ"""
         try:
             if not self.data_buffer:
                 return
@@ -449,10 +538,46 @@ class DerivAPI:
             # Créer DataFrame temporaire
             df = pd.DataFrame(self.data_buffer)
 
-            # Vérifier si le fichier existe
+            # 🆕 NOUVEAU: Standardiser les colonnes
+            required_columns = ['timestamp', 'price', 'open', 'high', 'low', 'close', 'volume', 'symbol', 'pip_size',
+                                'epoch']
+
+            # S'assurer que toutes les colonnes existent
+            for col in required_columns:
+                if col not in df.columns:
+                    if col in ['open', 'close']:
+                        df[col] = df['price']
+                    elif col in ['high', 'low']:
+                        df[col] = df['price']
+                    elif col == 'volume':
+                        df[col] = 1000
+                    elif col == 'symbol':
+                        df[col] = 'R_75'
+                    elif col == 'pip_size':
+                        df[col] = 0.00001
+                    elif col == 'epoch':
+                        df[col] = 0
+
+            # Réorganiser les colonnes dans l'ordre standard
+            df = df[required_columns]
+
+            # Vérifier si le fichier existe et si le format est compatible
             if os.path.exists(self.csv_file):
-                # Lire les dernières données pour éviter les doublons
                 try:
+                    # 🆕 NOUVEAU: Vérifier le format du fichier existant
+                    existing_df = pd.read_csv(self.csv_file, nrows=1)  # Lire juste la première ligne
+                    existing_columns = list(existing_df.columns)
+
+                    # Si les colonnes ne correspondent pas, recréer le fichier
+                    if existing_columns != required_columns:
+                        logger.info(f"🔄 Format CSV incompatible, recréation du fichier")
+                        logger.info(f"   Anciennes colonnes: {existing_columns}")
+                        logger.info(f"   Nouvelles colonnes: {required_columns}")
+                        df.to_csv(self.csv_file, index=False)
+                        logger.info(f"💾 Fichier CSV recréé: {len(df)} points")
+                        return
+
+                    # Format compatible, lire le fichier complet
                     existing_df = pd.read_csv(self.csv_file, parse_dates=['timestamp'])
                     last_timestamp = existing_df['timestamp'].max()
 
@@ -465,9 +590,10 @@ class DerivAPI:
                         logger.debug(f"💾 {len(new_data)} nouveaux points sauvegardés")
 
                 except Exception as e:
-                    # Si erreur de lecture, sauvegarder tout
+                    # Si erreur de lecture, recréer le fichier
+                    logger.warning(f"Erreur lecture CSV existant: {e}")
                     df.to_csv(self.csv_file, index=False)
-                    logger.warning(f"Sauvegarde complète due à erreur: {e}")
+                    logger.info(f"💾 Fichier CSV recréé due à erreur: {len(df)} points")
             else:
                 # Première sauvegarde
                 df.to_csv(self.csv_file, index=False)
@@ -475,17 +601,6 @@ class DerivAPI:
 
         except Exception as e:
             logger.error(f"Erreur sauvegarde CSV: {e}")
-
-    def get_connection_status(self) -> Dict:
-        """Obtenir le statut de connexion"""
-        return {
-            'connected': self.connected,
-            'authenticated': self.authenticated,
-            'messages_received': self.messages_received,
-            'buffer_size': len(self.data_buffer),
-            'last_tick': self.last_tick_time.isoformat() if self.last_tick_time else None,
-            'reconnect_attempts': self.reconnect_attempts
-        }
 
     async def disconnect(self):
         """Fermer la connexion proprement"""
@@ -537,7 +652,11 @@ if __name__ == "__main__":
                 await asyncio.sleep(1)
                 data = await api.get_latest_data()
                 if data is not None:
-                    print(f"Données reçues: {len(data)} points, dernier prix: {data['price'].iloc[-1]}")
+                    print(f"Données reçues: {len(data)} points")
+                    print(f"Colonnes: {list(data.columns)}")
+                    if len(data) > 0:
+                        print(f"Dernier prix: {data['price'].iloc[-1]}")
+                        print(f"High/Low: {data['high'].iloc[-1]:.5f}/{data['low'].iloc[-1]:.5f}")
 
         finally:
             await api.disconnect()
