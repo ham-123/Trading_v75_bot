@@ -37,27 +37,61 @@ class SignalGenerator:
             f"🎯 Générateur de signaux initialisé (Risk: {self.risk_amount}$, Ratio: 1:{self.risk_reward_ratio})")
 
     def generate_signal(self, df: pd.DataFrame, tech_score: int, ai_prediction: Dict) -> Optional[Dict]:
-        """Générer un signal de trading basé sur l'analyse technique et IA"""
+        """Générer un signal de trading avec validation multi-timeframes"""
         try:
             if df is None or len(df) == 0:
                 logger.debug("Aucune donnée fournie pour génération de signal")
                 return None
 
+            # 🆕 NOUVEAU : Analyse multi-timeframes AVANT tout
+            logger.debug("🔍 Démarrage analyse multi-timeframes...")
+            mtf_analyzer = MultiTimeframeAnalysis()
+            confluence_result = mtf_analyzer.multi_timeframe_analysis(df)
+
+            # 🆕 NOUVEAU : Vérifier si le signal est valide selon la confluence
+            if not mtf_analyzer.should_trade(confluence_result):
+                logger.debug("❌ Signal rejeté par analyse multi-timeframes")
+                return None
+
+            logger.info("✅ Signal validé par multi-timeframes!")
+
+            # 🆕 NOUVEAU : Améliorer le score technique selon la confluence
+            conf_score = confluence_result.get('confluence_score', 0)
+            original_tech_score = tech_score
+
+            if conf_score >= 0.8:  # Confluence très forte (80%+)
+                tech_score = min(100, tech_score + 15)  # Bonus +15 points
+                logger.debug(f"🚀 Bonus confluence très forte: {original_tech_score} → {tech_score}")
+            elif conf_score >= 0.65:  # Confluence forte (65%+)
+                tech_score = min(100, tech_score + 10)  # Bonus +10 points
+                logger.debug(f"📈 Bonus confluence forte: {original_tech_score} → {tech_score}")
+
+            # 🆕 NOUVEAU : Vérifier que la direction IA est alignée avec multi-timeframes
+            mtf_direction = confluence_result.get('direction')
+            ai_direction = 'BUY' if ai_prediction.get('direction') == 'UP' else 'SELL'
+
+            if mtf_direction != ai_direction:
+                logger.debug(f"❌ Directions non alignées: MTF={mtf_direction}, IA={ai_direction}")
+                return None
+
+            logger.debug(f"✅ Directions alignées: MTF={mtf_direction}, IA={ai_direction}")
+
+            # === RESTE DE VOTRE CODE EXISTANT ===
             current_price = float(df['price'].iloc[-1])
 
-            # Vérifier les conditions préliminaires
+            # Vérifier les conditions préliminaires (VOTRE CODE EXISTANT)
             if not self._check_basic_conditions(tech_score, ai_prediction):
                 return None
 
-            # Déterminer la direction du signal
+            # Déterminer la direction du signal (VOTRE CODE EXISTANT)
             signal_direction = self._determine_signal_direction(df, tech_score, ai_prediction)
             if not signal_direction:
                 return None
 
-            # Calculer le score combiné
+            # Calculer le score combiné (VOTRE CODE EXISTANT)
             combined_score = self._calculate_combined_score(tech_score, ai_prediction['confidence'])
 
-            # Calculer les niveaux de prix (entry, stop loss, take profit)
+            # Calculer les niveaux de prix (VOTRE CODE EXISTANT)
             levels = self._calculate_price_levels(
                 current_price,
                 signal_direction,
@@ -69,7 +103,7 @@ class SignalGenerator:
                 logger.debug("Impossible de calculer les niveaux de prix")
                 return None
 
-            # Créer l'objet signal
+            # 🆕 AMÉLIORER : Créer le signal avec les infos multi-timeframes
             signal = {
                 'timestamp': datetime.now().isoformat(),
                 'direction': signal_direction,
@@ -80,20 +114,44 @@ class SignalGenerator:
                 'reward_amount': levels['reward_amount'],
                 'risk_reward_ratio': levels['actual_ratio'],
                 'tech_score': tech_score,
+                'original_tech_score': original_tech_score,  # 🆕 Score original
                 'ai_confidence': round(ai_prediction['confidence'], 3),
                 'ai_direction': ai_prediction['direction'],
                 'combined_score': round(combined_score, 1),
                 'stop_loss_pct': levels['stop_loss_pct'],
                 'take_profit_pct': levels['take_profit_pct'],
-                'market_conditions': self._get_market_context(df)
+                'market_conditions': self._get_market_context(df),
+
+                # 🆕 NOUVEAU : Informations multi-timeframes
+                'multi_timeframe': {
+                    'confluence_score': round(conf_score, 3),
+                    'confluence_percentage': round(conf_score * 100, 1),
+                    'strength': confluence_result.get('strength', 'unknown'),
+                    'mtf_direction': mtf_direction,
+                    'summary': confluence_result.get('summary', ''),
+                    'timeframes_detail': {}
+                }
             }
 
-            logger.info(f"🎯 Signal généré: {signal_direction} à {current_price} (Score: {combined_score:.1f})")
+            # 🆕 NOUVEAU : Ajouter détails par timeframe
+            timeframes_data = confluence_result.get('timeframes', {})
+            for tf_name, tf_data in timeframes_data.items():
+                signal['multi_timeframe']['timeframes_detail'][tf_name] = {
+                    'direction': tf_data.get('direction'),
+                    'score': tf_data.get('score', 0),
+                    'strength': tf_data.get('strength', 0),
+                    'trend': tf_data.get('trend', 'unknown')
+                }
+
+            logger.info(f"🎯 Signal multi-timeframes généré: {signal_direction} à {current_price}")
+            logger.info(f"   📊 Confluence: {conf_score:.1%} ({confluence_result.get('strength')})")
+            logger.info(f"   📈 Score technique: {original_tech_score} → {tech_score}")
+            logger.info(f"   🎯 Score combiné: {combined_score:.1f}")
 
             return signal
 
         except Exception as e:
-            logger.error(f"Erreur génération signal: {e}")
+            logger.error(f"Erreur génération signal avec multi-timeframes: {e}")
             return None
 
     def _check_basic_conditions(self, tech_score: int, ai_prediction: Dict) -> bool:

@@ -150,6 +150,49 @@ class TelegramBot:
 
 🕐 {timestamp}
 """
+            # 🆕 NOUVEAU : Section Multi-Timeframes
+            mtf_info = signal.get('multi_timeframe', {})
+            if mtf_info and mtf_info.get('confluence_score', 0) > 0:
+                conf_percentage = mtf_info.get('confluence_percentage', 0)
+                strength = mtf_info.get('strength', 'unknown')
+                mtf_direction = mtf_info.get('mtf_direction', 'N/A')
+
+                # Emoji selon la force
+                if strength == 'very_strong':
+                    strength_emoji = "🟢🟢🟢"
+                elif strength == 'strong':
+                    strength_emoji = "🟢🟢"
+                elif strength == 'moderate':
+                    strength_emoji = "🟡"
+                else:
+                    strength_emoji = "🔴"
+
+                message += f"""
+
+            🎯 <b>Multi-Timeframes:</b>
+            {strength_emoji} Confluence: {conf_percentage:.0f}% ({strength.upper()})
+            🔄 M5/M15/H1: {mtf_direction} alignés ✅"""
+
+                # Détail par timeframe
+                timeframes_detail = mtf_info.get('timeframes_detail', {})
+                if timeframes_detail:
+                    tf_summary = []
+                    for tf, data in timeframes_detail.items():
+                        direction = data.get('direction', 'N/A')
+                        score = data.get('score', 0)
+
+                        if direction == 'BUY':
+                            tf_emoji = "🟢"
+                        elif direction == 'SELL':
+                            tf_emoji = "🔴"
+                        else:
+                            tf_emoji = "⚪"
+
+                        tf_summary.append(f"{tf_emoji}{tf}({score})")
+
+                    message += f"""
+            📊 Détail: {' '.join(tf_summary)}"""
+
 
             # Ajouter le contexte de marché si disponible
             market_context = signal.get('market_conditions', {})
