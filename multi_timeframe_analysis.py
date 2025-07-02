@@ -41,24 +41,72 @@ class MultiTimeframeAnalysis:
         logger.info("📊 Multi-Timeframe Analysis initialisé")
 
     def resample_data(self, df: pd.DataFrame, timeframe: str) -> pd.DataFrame:
-        """Transformer les données 5min vers 15min ou 1h"""
+        """Transformer les données 5min vers 15min ou 1h - VERSION CORRIGÉE"""
         try:
             if 'timestamp' not in df.columns:
                 logger.warning("Pas de colonne timestamp")
                 return df
 
+            # 🆕 DEBUG: Vérifier les données d'entrée
+            logger.info(f"🔍 DEBUG Resample {timeframe}:")
+            logger.info(f"   📊 Données d'entrée: {len(df)} lignes")
+
             # Préparer les données
             df_copy = df.copy()
-            df_copy['timestamp'] = pd.to_datetime(df_copy['timestamp'])
+
+            # 🆕 VÉRIFICATION TIMESTAMPS
+            logger.info(f"   📅 Premier timestamp: {df_copy['timestamp'].iloc[0]}")
+            logger.info(f"   📅 Dernier timestamp: {df_copy['timestamp'].iloc[-1]}")
+
+            # Conversion timestamp avec gestion d'erreur
+            try:
+                df_copy['timestamp'] = pd.to_datetime(df_copy['timestamp'])
+            except Exception as e:
+                logger.error(f"❌ Erreur conversion timestamp: {e}")
+                return df
+
+            # 🆕 VÉRIFICATION PLAGE TEMPORELLE
+            time_span = df_copy['timestamp'].iloc[-1] - df_copy['timestamp'].iloc[0]
+            hours = time_span.total_seconds() / 3600
+            logger.info(f"   ⏱️ Plage temporelle: {hours:.2f} heures")
+
+            # 🆕 VÉRIFICATION SEUILS MINIMUM
+            min_hours_needed = {'15min': 1.0, '1h': 3.0}
+            min_hours = min_hours_needed.get(timeframe, 1.0)
+
+            if hours < min_hours:
+                logger.warning(f"⚠️ Pas assez de données pour {timeframe}: {hours:.2f}h < {min_hours}h")
+                # Retourner un DataFrame vide mais avec structure correcte
+                empty_df = pd.DataFrame(columns=['timestamp', 'price', 'high', 'low', 'volume'])
+                return empty_df
+
+            # Set index timestamp
             df_copy.set_index('timestamp', inplace=True)
 
-            # Créer high/low si manquants
+            # 🆕 Créer high/low/volume si manquants AVANT resampling
             if 'high' not in df_copy.columns:
                 df_copy['high'] = df_copy['price']
+                logger.debug("   🔧 Colonne 'high' créée")
             if 'low' not in df_copy.columns:
                 df_copy['low'] = df_copy['price']
+                logger.debug("   🔧 Colonne 'low' créée")
             if 'volume' not in df_copy.columns:
                 df_copy['volume'] = 1000  # Volume fictif
+                logger.debug("   🔧 Colonne 'volume' créée")
+
+            # 🆕 S'assurer que high >= price >= low
+            df_copy['high'] = np.maximum(df_copy['high'], df_copy['price'])
+            df_copy['low'] = np.minimum(df_copy['low'], df_copy['price'])
+
+            # 🆕 CORRECTION: Utiliser les bons codes pandas pour timeframe
+            timeframe_mapping = {
+                '5min': '5T',  # 5 minutes
+                '15min': '15T',  # 15 minutes
+                '1h': '1H'  # 1 heure
+            }
+
+            pandas_timeframe = timeframe_mapping.get(timeframe, timeframe)
+            logger.info(f"   🔧 Timeframe: {timeframe} -> {pandas_timeframe}")
 
             # Règles pour transformer les données
             rules = {
@@ -68,17 +116,44 @@ class MultiTimeframeAnalysis:
                 'volume': 'sum'  # Volume = somme
             }
 
-            # Transformer vers le nouveau timeframe
-            resampled = df_copy.resample(timeframe).agg(rules)
+            # 🆕 RESAMPLE avec gestion d'erreur
+            try:
+                logger.info(f"   🔄 Début resampling vers {pandas_timeframe}...")
+                resampled = df_copy.resample(pandas_timeframe).agg(rules)
+                logger.info(f"   📊 Après resampling: {len(resampled)} bougies brutes")
+            except Exception as e:
+                logger.error(f"❌ Erreur pendant resampling: {e}")
+                return df
+
+            # 🆕 NETTOYAGE PLUS STRICT
+            # Supprimer les lignes avec NaN
             resampled = resampled.dropna()
+            logger.info(f"   🧹 Après nettoyage NaN: {len(resampled)} bougies")
+
+            # Supprimer les bougies avec volume = 0 (périodes sans données)
+            if 'volume' in resampled.columns:
+                resampled = resampled[resampled['volume'] > 0]
+                logger.info(f"   🧹 Après nettoyage volume: {len(resampled)} bougies")
+
+            # Reset index pour remettre timestamp en colonne
             resampled.reset_index(inplace=True)
 
-            logger.debug(f"Transformation {timeframe}: {len(df)} → {len(resampled)} bougies")
+            # 🆕 VÉRIFICATION FINALE
+            if len(resampled) > 0:
+                logger.info(f"   ✅ SUCCÈS: {len(df)} -> {len(resampled)} bougies {timeframe}")
+                logger.info(f"   📅 Première bougie: {resampled['timestamp'].iloc[0]}")
+                logger.info(f"   📅 Dernière bougie: {resampled['timestamp'].iloc[-1]}")
+            else:
+                logger.warning(f"   ❌ ÉCHEC: Aucune bougie générée pour {timeframe}")
+
             return resampled
 
         except Exception as e:
-            logger.error(f"Erreur transformation {timeframe}: {e}")
+            logger.error(f"❌ Erreur transformation {timeframe}: {e}")
+            import traceback
+            logger.error(f"📋 Traceback: {traceback.format_exc()}")
             return df
+
 
     def analyze_timeframe(self, df: pd.DataFrame, timeframe: str) -> Dict:
         """Analyser UN timeframe spécifique"""

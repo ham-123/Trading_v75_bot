@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Intégration Dashboard - À ajouter dans votre main.py
-🚀 Module pour envoyer les données du bot vers le dashboard
+Intégration Dashboard - Module pour connecter le bot au dashboard
+🚀 Module pour envoyer les données du bot vers le dashboard temps réel
+Version 3.1 - Intégration complète avec gestion d'erreurs robuste
 """
 
 import requests
@@ -9,24 +10,69 @@ import json
 import logging
 import asyncio
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import os
+import time
 
 logger = logging.getLogger(__name__)
 
 
 class DashboardIntegration:
-    """Classe pour intégrer le bot avec le dashboard"""
+    """Classe pour intégrer le bot avec le dashboard temps réel"""
 
     def __init__(self):
         """Initialisation de l'intégration dashboard"""
-        self.api_url = os.getenv('DASHBOARD_API_URL', 'http://localhost:8000')
+        self.api_url = os.getenv('DASHBOARD_API_URL', 'http://dashboard-api:8000')
         self.enabled = os.getenv('DASHBOARD_ENABLED', 'true').lower() == 'true'
+
+        # Configuration de retry et timeout
+        self.max_retries = 3
+        self.timeout = 5
+        self.retry_delay = 1
+
+        # Throttling pour éviter le spam
+        self._last_price_send = 0
+        self._last_metrics_send = 0
+        self._price_throttle = 30  # 30 secondes entre envois de prix
+        self._metrics_throttle = 60  # 60 secondes entre envois de métriques
+
+        # Statistiques d'envoi
+        self.signals_sent = 0
+        self.metrics_sent = 0
+        self.prices_sent = 0
+        self.errors_count = 0
+        self.last_connection_test = 0
+        self.connection_status = False
 
         if self.enabled:
             logger.info(f"🚀 Dashboard intégration activée: {self.api_url}")
+            # Test initial de connexion
+            self._test_connection_async()
         else:
             logger.info("📊 Dashboard intégration désactivée")
+
+    def _test_connection_async(self):
+        """Test de connexion asynchrone non-bloquant"""
+        try:
+            current_time = time.time()
+            # Tester seulement toutes les 5 minutes
+            if current_time - self.last_connection_test < 300:
+                return self.connection_status
+
+            self.last_connection_test = current_time
+            response = requests.get(f"{self.api_url}/", timeout=2)
+            self.connection_status = response.status_code == 200
+
+            if self.connection_status:
+                logger.debug("✅ Dashboard API accessible")
+            else:
+                logger.warning(f"⚠️ Dashboard API erreur: {response.status_code}")
+
+        except Exception as e:
+            self.connection_status = False
+            logger.debug(f"📊 Dashboard API non accessible: {e}")
+
+        return self.connection_status
 
     async def send_signal(self, signal_data: Dict) -> bool:
         """Envoyer un nouveau signal au dashboard"""
@@ -48,357 +94,412 @@ class DashboardIntegration:
                 'multi_timeframe': signal_data.get('multi_timeframe', {})
             }
 
-            # Envoyer à l'API
-            response = requests.post(
-                f"{self.api_url}/api/signals",
-                json=api_data,
-                timeout=5
+            # Nettoyer les données (supprimer les valeurs None)
+            api_data = {k: v for k, v in api_data.items() if v is not None}
+
+            # Envoyer avec retry
+            success = await self._send_with_retry(
+                endpoint="/api/signals",
+                data=api_data,
+                operation="signal"
             )
 
-            if response.status_code == 200:
-                logger.debug("📊 Signal envoyé au dashboard")
-                return True
-            else:
-                logger.warning(f"⚠️ Erreur dashboard API: {response.status_code}")
-                return False
+            if success:
+                self.signals_sent += 1
+                logger.debug(f"📊 Signal envoyé au dashboard (Total: {self.signals_sent})")
 
-        except requests.exceptions.ConnectionError:
-            logger.debug("📊 Dashboard API non disponible")
-            return False
+            return success
+
         except Exception as e:
+            self.errors_count += 1
             logger.error(f"❌ Erreur envoi signal dashboard: {e}")
             return False
 
     async def send_system_metrics(self, bot_stats: Dict) -> bool:
-        """Envoyer les métriques système"""
+        """Envoyer les métriques système avec throttling"""
         if not self.enabled:
             return True
 
         try:
+            # Throttling - éviter le spam
+            current_time = time.time()
+            if current_time - self._last_metrics_send < self._metrics_throttle:
+                return True
+
+            self._last_metrics_send = current_time
+
             # Préparer métriques
             metrics = {
                 'timestamp': datetime.now().isoformat(),
                 'bot_status': 'RUNNING' if bot_stats.get('connected', False) else 'STOPPED',
-                'deriv_connected': bot_stats.get('connected', False),
+                'deriv_connected': bool(bot_stats.get('connected', False)),
                 'telegram_connected': True,  # Assumé si on peut envoyer
-                'signals_today': bot_stats.get('signals_today', 0),
-                'mtf_rejections': bot_stats.get('mtf_rejections', 0),
-                'ai_accuracy': bot_stats.get('ai_accuracy', 0),
-                'uptime_hours': bot_stats.get('uptime_hours', 0),
-                'premium_signals': bot_stats.get('premium_signals', 0),
-                'high_quality_signals': bot_stats.get('high_quality_signals', 0)
+                'signals_today': int(bot_stats.get('signals_today', 0)),
+                'mtf_rejections': int(bot_stats.get('mtf_rejections', 0)),
+                'ai_accuracy': float(bot_stats.get('ai_accuracy', 0)),
+                'uptime_hours': float(bot_stats.get('uptime_hours', 0)),
+                'premium_signals': int(bot_stats.get('premium_signals', 0)),
+                'high_quality_signals': int(bot_stats.get('high_quality_signals', 0))
             }
 
-            response = requests.post(
-                f"{self.api_url}/api/system/metrics",
-                json=metrics,
-                timeout=5
+            # Envoyer avec retry
+            success = await self._send_with_retry(
+                endpoint="/api/system/metrics",
+                data=metrics,
+                operation="metrics"
             )
 
-            if response.status_code == 200:
-                logger.debug("📊 Métriques envoyées au dashboard")
-                return True
-            else:
-                logger.warning(f"⚠️ Erreur metrics dashboard: {response.status_code}")
-                return False
+            if success:
+                self.metrics_sent += 1
+                logger.debug(f"📊 Métriques envoyées au dashboard (Total: {self.metrics_sent})")
 
-        except requests.exceptions.ConnectionError:
-            logger.debug("📊 Dashboard API non disponible")
-            return False
+            return success
+
         except Exception as e:
+            self.errors_count += 1
             logger.error(f"❌ Erreur envoi metrics dashboard: {e}")
             return False
 
     async def send_price_data(self, price_data: Dict) -> bool:
-        """Envoyer données de prix temps réel"""
+        """Envoyer données de prix temps réel avec throttling intelligent"""
         if not self.enabled:
             return True
 
         try:
-            # Envoyer seulement toutes les 30 secondes pour éviter le spam
-            current_time = datetime.now()
-            if hasattr(self, '_last_price_send'):
-                if (current_time - self._last_price_send).total_seconds() < 30:
-                    return True
+            # Throttling intelligent - envoyer toutes les 30 secondes
+            current_time = time.time()
+            if current_time - self._last_price_send < self._price_throttle:
+                return True
 
             self._last_price_send = current_time
 
             # Préparer données prix
             api_data = {
-                'timestamp': price_data.get('timestamp', current_time.isoformat()),
-                'price': price_data.get('price'),
-                'high': price_data.get('high', price_data.get('price')),
-                'low': price_data.get('low', price_data.get('price')),
-                'volume': price_data.get('volume', 1000)
+                'timestamp': price_data.get('timestamp', datetime.now().isoformat()),
+                'price': float(price_data.get('price', 0)),
+                'high': float(price_data.get('high', price_data.get('price', 0))),
+                'low': float(price_data.get('low', price_data.get('price', 0))),
+                'volume': float(price_data.get('volume', 1000))
             }
 
-            response = requests.post(
-                f"{self.api_url}/api/price",
-                json=api_data,
-                timeout=5
-            )
-
-            if response.status_code == 200:
-                logger.debug("📊 Prix envoyé au dashboard")
-                return True
-            else:
-                logger.warning(f"⚠️ Erreur price dashboard: {response.status_code}")
+            # Validation des données
+            if api_data['price'] <= 0:
+                logger.warning("⚠️ Prix invalide, envoi ignoré")
                 return False
 
-        except requests.exceptions.ConnectionError:
-            logger.debug("📊 Dashboard API non disponible")
-            return False
+            # Envoyer avec retry
+            success = await self._send_with_retry(
+                endpoint="/api/price",
+                data=api_data,
+                operation="price"
+            )
+
+            if success:
+                self.prices_sent += 1
+                logger.debug(f"📊 Prix envoyé au dashboard: {api_data['price']:.5f} (Total: {self.prices_sent})")
+
+            return success
+
         except Exception as e:
+            self.errors_count += 1
             logger.error(f"❌ Erreur envoi prix dashboard: {e}")
             return False
 
+    async def _send_with_retry(self, endpoint: str, data: Dict, operation: str) -> bool:
+        """Méthode générique d'envoi avec retry et gestion d'erreurs"""
+        for attempt in range(self.max_retries):
+            try:
+                response = requests.post(
+                    f"{self.api_url}{endpoint}",
+                    json=data,
+                    timeout=self.timeout
+                )
+
+                if response.status_code == 200:
+                    return True
+                elif response.status_code == 422:
+                    # Erreur de validation - ne pas retry
+                    logger.warning(f"⚠️ Erreur validation {operation}: {response.text}")
+                    return False
+                else:
+                    logger.warning(f"⚠️ Erreur {operation} (tentative {attempt + 1}): {response.status_code}")
+
+            except requests.exceptions.ConnectionError:
+                if attempt == 0:  # Log seulement à la première tentative
+                    logger.debug(f"📊 Dashboard API non accessible pour {operation}")
+
+            except requests.exceptions.Timeout:
+                logger.warning(f"⏱️ Timeout {operation} (tentative {attempt + 1})")
+
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"🌐 Erreur réseau {operation}: {e}")
+
+            except Exception as e:
+                logger.error(f"❌ Erreur inattendue {operation}: {e}")
+                return False
+
+            # Attendre avant retry (sauf pour la dernière tentative)
+            if attempt < self.max_retries - 1:
+                await asyncio.sleep(self.retry_delay * (attempt + 1))
+
+        # Toutes les tentatives ont échoué
+        self.errors_count += 1
+        return False
+
     def test_connection(self) -> bool:
-        """Tester la connexion au dashboard"""
+        """Tester la connexion au dashboard de manière synchrone"""
         if not self.enabled:
             return True
 
+        return self._test_connection_async()
+
+    async def send_startup_notification(self, bot_info: Dict) -> bool:
+        """Envoyer notification de démarrage du bot"""
         try:
-            response = requests.get(f"{self.api_url}/", timeout=5)
-            return response.status_code == 200
-        except:
-            return False
-
-
-# =============================================================================
-# MODIFICATIONS À AJOUTER DANS VOTRE MAIN.PY
-# =============================================================================
-
-"""
-INSTRUCTIONS D'INTÉGRATION:
-
-1. Ajoutez cet import en haut de votre main.py:
-   from bot_dashboard_integration import DashboardIntegration
-
-2. Dans la classe OptimizedTradingBotMTF.__init__(), ajoutez:
-   self.dashboard = DashboardIntegration()
-
-3. Dans initialize(), après l'initialisation réussie, ajoutez:
-   # Test connexion dashboard
-   if self.dashboard.test_connection():
-       logger.info("✅ Dashboard connecté")
-   else:
-       logger.warning("⚠️ Dashboard non disponible")
-
-4. Dans process_optimized_signal_mtf(), après l'envoi Telegram, ajoutez:
-   # Envoyer au dashboard
-   await self.dashboard.send_signal(signal)
-
-5. Dans send_mtf_health_notification(), ajoutez:
-   # Envoyer métriques au dashboard
-   await self.dashboard.send_system_metrics(bot_stats)
-
-6. Dans process_market_data_optimized_mtf(), ajoutez périodiquement:
-   # Envoyer prix au dashboard (toutes les 30s automatiquement)
-   if data is not None and len(data) > 0:
-       latest_data = {
-           'price': float(data['price'].iloc[-1]),
-           'high': float(data['high'].iloc[-1]) if 'high' in data else float(data['price'].iloc[-1]),
-           'low': float(data['low'].iloc[-1]) if 'low' in data else float(data['price'].iloc[-1]),
-           'volume': float(data['volume'].iloc[-1]) if 'volume' in data else 1000,
-           'timestamp': datetime.now().isoformat()
-       }
-       await self.dashboard.send_price_data(latest_data)
-
-7. Dans votre .env, ajoutez:
-   DASHBOARD_ENABLED=true
-   DASHBOARD_API_URL=http://localhost:8000
-"""
-
-
-# =============================================================================
-# CODE COMPLET D'INTÉGRATION POUR MAIN.PY
-# =============================================================================
-
-class OptimizedTradingBotMTFWithDashboard:
-    """Version de votre bot avec intégration dashboard"""
-
-    def __init__(self):
-        """Initialisation avec dashboard"""
-        # Votre code existant...
-
-        # 🆕 AJOUTER CETTE LIGNE
-        self.dashboard = DashboardIntegration()
-
-        logger.info("🚀 Bot Trading Vol75 OPTIMISÉ MTF + Dashboard initialisé")
-
-    async def initialize(self):
-        """Initialisation avec test dashboard"""
-        try:
-            # Votre code d'initialisation existant...
-
-            # 🆕 AJOUTER APRÈS L'INITIALISATION RÉUSSIE
-            # Test connexion dashboard
-            if self.dashboard.test_connection():
-                logger.info("✅ Dashboard connecté")
-            else:
-                logger.warning("⚠️ Dashboard non disponible")
-
-            # Votre code existant...
-
-        except Exception as e:
-            logger.error(f"❌ Erreur d'initialisation optimisée MTF: {e}")
-            raise
-
-    async def process_optimized_signal_mtf(self, signal):
-        """Traitement signal avec envoi dashboard"""
-        try:
-            # Votre code existant...
-
-            # 📱 Envoyer notification Telegram MTF COMPLÈTE
-            await self.telegram_bot.send_signal(signal)
-
-            # 🆕 AJOUTER CETTE LIGNE
-            # 📊 Envoyer au dashboard
-            await self.dashboard.send_signal(signal)
-
-            # Votre code existant...
-
-        except Exception as e:
-            logger.error(f"Erreur traitement signal optimisé MTF: {e}")
-
-    async def send_mtf_health_notification(self):
-        """Notification santé avec envoi dashboard"""
-        try:
-            # Votre code existant pour créer bot_stats...
-
-            success = await self.telegram_bot.send_mtf_health_notification(bot_stats)
-
-            # 🆕 AJOUTER CETTE LIGNE
-            # 📊 Envoyer métriques au dashboard
-            await self.dashboard.send_system_metrics(bot_stats)
-
-            if success:
-                logger.info("📱 Notification de santé MTF envoyée")
-
-        except Exception as e:
-            logger.error(f"Erreur notification santé MTF: {e}")
-
-    async def process_market_data_optimized_mtf(self):
-        """Traitement marché avec envoi prix dashboard"""
-        try:
-            # Votre code existant...
-            data = await self.deriv_api.get_latest_data()
-
-            if data is None or len(data) < 100:
-                return
-
-            self.current_price = float(data['price'].iloc[-1])
-
-            # 🆕 AJOUTER CES LIGNES
-            # 📊 Envoyer prix au dashboard (throttlé automatiquement)
-            latest_data = {
-                'price': self.current_price,
-                'high': float(data['high'].iloc[-1]) if 'high' in data else self.current_price,
-                'low': float(data['low'].iloc[-1]) if 'low' in data else self.current_price,
-                'volume': float(data['volume'].iloc[-1]) if 'volume' in data else 1000,
-                'timestamp': datetime.now().isoformat()
-            }
-            await self.dashboard.send_price_data(latest_data)
-
-            # Votre code existant...
-
-        except Exception as e:
-            logger.error(f"Erreur traitement optimisé MTF: {e}")
-
-
-# =============================================================================
-# VARIABLES D'ENVIRONNEMENT À AJOUTER
-# =============================================================================
-
-"""
-Ajoutez ces lignes dans votre fichier .env:
-
-# Dashboard Configuration
-DASHBOARD_ENABLED=true
-DASHBOARD_API_URL=http://localhost:8000
-
-# Redis Configuration (optionnel)
-REDIS_HOST=localhost
-REDIS_PORT=6379
-"""
-
-# =============================================================================
-# STRUCTURE FINALE DES FICHIERS
-# =============================================================================
-
-"""
-Votre projet final aura cette structure:
-
-votre-projet/
-├── main.py                          # Votre bot modifié
-├── ai_model.py                      # IA Ensemble
-├── telegram_bot.py                  # Telegram MTF
-├── deriv_api.py                     # API Deriv
-├── technical_analysis.py            # Analyse technique
-├── signal_generator.py              # Générateur MTF
-├── multi_timeframe_analysis.py      # Analyse MTF
-├── bot_dashboard_integration.py     # 🆕 Ce fichier
-├── docker-compose.yml               # 🆕 Avec dashboard
-├── Dockerfile                       # Bot existant
-├── Dockerfile.dashboard             # 🆕 API Dashboard
-├── Dockerfile.streamlit             # 🆕 Interface
-├── requirements.txt                 # Bot existant
-├── dashboard/
-│   ├── requirements.txt             # 🆕 Dashboard deps
-│   ├── api.py                       # 🆕 API FastAPI
-│   └── app.py                       # 🆕 Interface Streamlit
-├── data/                            # Données partagées
-├── logs/                            # Logs partagés
-└── .env                             # Variables d'environnement
-"""
-
-if __name__ == "__main__":
-    # Code de test
-    import asyncio
-
-
-    async def test_dashboard_integration():
-        """Test de l'intégration dashboard"""
-        dashboard = DashboardIntegration()
-
-        print("🧪 Test de l'intégration dashboard...")
-
-        # Test connexion
-        connected = dashboard.test_connection()
-        print(f"Connexion: {'✅' if connected else '❌'}")
-
-        if connected:
-            # Test signal
-            test_signal = {
-                'direction': 'BUY',
-                'entry_price': 1050.75,
-                'stop_loss': 1048.50,
-                'take_profit': 1057.25,
-                'tech_score': 85,
-                'ai_confidence': 0.87,
-                'combined_score': 88.5,
-                'signal_quality': 'PREMIUM',
-                'multi_timeframe': {
-                    'confluence_score': 0.82,
-                    'strength': 'very_strong'
+            startup_data = {
+                'timestamp': datetime.now().isoformat(),
+                'event_type': 'bot_startup',
+                'bot_version': bot_info.get('version', '3.1'),
+                'features_enabled': bot_info.get('features', []),
+                'ai_model': bot_info.get('ai_model', {}),
+                'configuration': {
+                    'trading_mode': bot_info.get('trading_mode', 'demo'),
+                    'capital': bot_info.get('capital', 1000),
+                    'risk_amount': bot_info.get('risk_amount', 10),
+                    'mtf_enabled': bot_info.get('mtf_enabled', True)
                 }
             }
 
-            success = await dashboard.send_signal(test_signal)
-            print(f"Test signal: {'✅' if success else '❌'}")
+            # Utiliser l'endpoint générique pour les événements
+            success = await self._send_with_retry(
+                endpoint="/api/system/metrics",
+                data=startup_data,
+                operation="startup"
+            )
 
-            # Test métriques
-            test_metrics = {
-                'connected': True,
-                'signals_today': 5,
-                'mtf_rejections': 12,
-                'ai_accuracy': 0.876,
-                'uptime_hours': 24.5
+            if success:
+                logger.info("📊 Notification démarrage envoyée au dashboard")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"❌ Erreur notification démarrage: {e}")
+            return False
+
+    async def send_shutdown_notification(self, shutdown_stats: Dict) -> bool:
+        """Envoyer notification d'arrêt du bot"""
+        try:
+            shutdown_data = {
+                'timestamp': datetime.now().isoformat(),
+                'event_type': 'bot_shutdown',
+                'session_stats': shutdown_stats,
+                'bot_status': 'STOPPED'
             }
 
-            success = await dashboard.send_system_metrics(test_metrics)
-            print(f"Test métriques: {'✅' if success else '❌'}")
+            success = await self._send_with_retry(
+                endpoint="/api/system/metrics",
+                data=shutdown_data,
+                operation="shutdown"
+            )
+
+            if success:
+                logger.info("📊 Notification arrêt envoyée au dashboard")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"❌ Erreur notification arrêt: {e}")
+            return False
+
+    def get_integration_stats(self) -> Dict:
+        """Obtenir les statistiques de l'intégration dashboard"""
+        return {
+            'enabled': self.enabled,
+            'api_url': self.api_url,
+            'connection_status': self.connection_status,
+            'signals_sent': self.signals_sent,
+            'metrics_sent': self.metrics_sent,
+            'prices_sent': self.prices_sent,
+            'errors_count': self.errors_count,
+            'success_rate': self._calculate_success_rate(),
+            'last_connection_test': datetime.fromtimestamp(
+                self.last_connection_test).isoformat() if self.last_connection_test else None,
+            'throttling': {
+                'price_interval': self._price_throttle,
+                'metrics_interval': self._metrics_throttle
+            }
+        }
+
+    def _calculate_success_rate(self) -> float:
+        """Calculer le taux de succès des envois"""
+        total_attempts = self.signals_sent + self.metrics_sent + self.prices_sent + self.errors_count
+        if total_attempts == 0:
+            return 100.0
+
+        successful = self.signals_sent + self.metrics_sent + self.prices_sent
+        return (successful / total_attempts) * 100
+
+    async def health_check(self) -> Dict:
+        """Vérification de santé de l'intégration dashboard"""
+        health_status = {
+            'dashboard_enabled': self.enabled,
+            'api_reachable': False,
+            'response_time_ms': None,
+            'last_error': None
+        }
+
+        if not self.enabled:
+            return health_status
+
+        try:
+            start_time = time.time()
+            response = requests.get(f"{self.api_url}/", timeout=self.timeout)
+            response_time = (time.time() - start_time) * 1000
+
+            health_status['api_reachable'] = response.status_code == 200
+            health_status['response_time_ms'] = round(response_time, 2)
+
+        except Exception as e:
+            health_status['last_error'] = str(e)
+
+        return health_status
+
+    def reset_stats(self):
+        """Réinitialiser les statistiques"""
+        self.signals_sent = 0
+        self.metrics_sent = 0
+        self.prices_sent = 0
+        self.errors_count = 0
+        logger.info("📊 Statistiques dashboard réinitialisées")
+
+    def configure_throttling(self, price_interval: int = 30, metrics_interval: int = 60):
+        """Configurer les intervalles de throttling"""
+        self._price_throttle = price_interval
+        self._metrics_throttle = metrics_interval
+        logger.info(f"📊 Throttling configuré: Prix={price_interval}s, Métriques={metrics_interval}s")
 
 
+# =============================================================================
+# FONCTIONS UTILITAIRES POUR L'INTÉGRATION
+# =============================================================================
+
+async def test_dashboard_integration():
+    """Test complet de l'intégration dashboard"""
+    print("🧪 Test de l'intégration dashboard...")
+
+    dashboard = DashboardIntegration()
+
+    # Test 1: Connexion
+    connected = dashboard.test_connection()
+    print(f"Connexion: {'✅' if connected else '❌'}")
+
+    if not connected:
+        print("❌ Dashboard API non disponible")
+        return
+
+    # Test 2: Signal de test
+    test_signal = {
+        'direction': 'BUY',
+        'entry_price': 1050.75,
+        'stop_loss': 1048.50,
+        'take_profit': 1057.25,
+        'tech_score': 85,
+        'ai_confidence': 0.87,
+        'combined_score': 88.5,
+        'signal_quality': 'PREMIUM',
+        'multi_timeframe': {
+            'confluence_score': 0.82,
+            'strength': 'very_strong'
+        }
+    }
+
+    signal_success = await dashboard.send_signal(test_signal)
+    print(f"Test signal: {'✅' if signal_success else '❌'}")
+
+    # Test 3: Métriques de test
+    test_metrics = {
+        'connected': True,
+        'signals_today': 5,
+        'mtf_rejections': 12,
+        'ai_accuracy': 0.876,
+        'uptime_hours': 24.5,
+        'premium_signals': 3,
+        'high_quality_signals': 2
+    }
+
+    metrics_success = await dashboard.send_system_metrics(test_metrics)
+    print(f"Test métriques: {'✅' if metrics_success else '❌'}")
+
+    # Test 4: Prix de test
+    test_price = {
+        'price': 1052.34567,
+        'high': 1053.12345,
+        'low': 1051.23456,
+        'volume': 1500
+    }
+
+    price_success = await dashboard.send_price_data(test_price)
+    print(f"Test prix: {'✅' if price_success else '❌'}")
+
+    # Test 5: Health check
+    health = await dashboard.health_check()
+    print(f"Health check: {health}")
+
+    # Statistiques finales
+    stats = dashboard.get_integration_stats()
+    print(f"\n📊 Statistiques:")
+    print(f"   Signaux envoyés: {stats['signals_sent']}")
+    print(f"   Métriques envoyées: {stats['metrics_sent']}")
+    print(f"   Prix envoyés: {stats['prices_sent']}")
+    print(f"   Erreurs: {stats['errors_count']}")
+    print(f"   Taux de succès: {stats['success_rate']:.1f}%")
+
+
+# =============================================================================
+# EXEMPLE D'UTILISATION DANS VOTRE MAIN.PY
+# =============================================================================
+
+def get_integration_example():
+    """Exemple d'intégration dans votre main.py"""
+    return """
+    # Dans votre classe OptimizedTradingBotMTF:
+
+    def __init__(self):
+        # Vos imports existants...
+        self.dashboard = DashboardIntegration()
+
+    async def initialize(self):
+        # Test connexion dashboard
+        if self.dashboard.test_connection():
+            logger.info("✅ Dashboard connecté")
+            # Envoyer notification de démarrage
+            await self.dashboard.send_startup_notification({
+                'version': '3.1',
+                'trading_mode': os.getenv('TRADING_MODE', 'demo'),
+                'capital': os.getenv('CAPITAL', 1000),
+                'mtf_enabled': True
+            })
+        else:
+            logger.warning("⚠️ Dashboard non disponible")
+
+    async def process_optimized_signal_mtf(self, signal):
+        # Votre code existant...
+        await self.telegram_bot.send_signal(signal)
+        # Envoyer au dashboard
+        await self.dashboard.send_signal(signal)
+
+    async def cleanup_optimized_mtf(self):
+        # Notification d'arrêt
+        await self.dashboard.send_shutdown_notification({
+            'signals_today': self.signals_today,
+            'uptime_hours': uptime,
+            'premium_signals': self.premium_signals
+        })
+    """
+
+
+if __name__ == "__main__":
     # Lancer le test si le fichier est exécuté directement
+    import asyncio
+
     asyncio.run(test_dashboard_integration())

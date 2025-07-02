@@ -160,37 +160,110 @@ class MultiTimeframeSignalGenerator:
             return None
 
     def _analyze_multi_timeframes(self, df: pd.DataFrame) -> Optional[Dict]:
-        """🚀 ANALYSE MULTI-TIMEFRAMES M5+M15+H1"""
+        """🚀 ANALYSE MULTI-TIMEFRAMES M5+M15+H1 - VERSION CORRIGÉE"""
         try:
+            # 🆕 DEBUG COMPLET DES DONNÉES D'ENTRÉE
+            logger.info(f"🔍 DEBUG MTF - Données d'entrée:")
+            logger.info(f"   📊 Taille DataFrame: {len(df)} lignes")
+            logger.info(f"   📋 Colonnes: {list(df.columns)}")
+
+            if 'timestamp' in df.columns:
+                # Vérifier les timestamps
+                logger.info(f"   📅 Premier timestamp: {df['timestamp'].iloc[0]}")
+                logger.info(f"   📅 Dernier timestamp: {df['timestamp'].iloc[-1]}")
+
+                # Convertir pour calculer la plage
+                timestamps = pd.to_datetime(df['timestamp'])
+                time_span = timestamps.iloc[-1] - timestamps.iloc[0]
+                actual_hours = time_span.total_seconds() / 3600
+
+                logger.info(f"   ⏱️ Plage temporelle totale: {time_span}")
+                logger.info(f"   📊 Plage en heures: {actual_hours:.2f}h")
+
+                # 🆕 VÉRIFICATIONS SEUILS RÉALISTES
+                required_hours_for_h1 = 4.0  # Au moins 4h pour avoir quelques bougies H1
+                required_hours_for_m15 = 1.5  # Au moins 1.5h pour avoir quelques bougies M15
+
+                if actual_hours < required_hours_for_m15:
+                    logger.warning(f"⚠️ Pas assez de données temporelles pour MTF:")
+                    logger.warning(f"   📊 Actuel: {actual_hours:.2f}h")
+                    logger.warning(f"   📊 Requis M15: {required_hours_for_m15}h")
+                    logger.warning(f"   📊 Requis H1: {required_hours_for_h1}h")
+                    logger.info("🔄 Passage en mode MTF simplifié")
+                    return self._simple_mtf_analysis(df)
+
             # 🆕 SEUIL ADAPTATIF selon les données disponibles
             min_data_required = 200
+
             if len(df) < min_data_required:
-                logger.debug(f"Pas assez de données pour MTF: {len(df)} < {min_data_required}")
+                logger.warning(f"🔄 Données limitées pour MTF: {len(df)} points < {min_data_required}")
 
-                # 🆕 MODE DÉGRADÉ: Analyse simple sur M5 uniquement
-                if len(df) >= 50:
-                    logger.debug("Mode dégradé MTF: M5 seulement")
-                    return self._simple_mtf_analysis(df)
+                # Vérifier si on a quand même assez de temps
+                if 'timestamp' in df.columns:
+                    timestamps = pd.to_datetime(df['timestamp'])
+                    time_span = timestamps.iloc[-1] - timestamps.iloc[0]
+                    actual_hours = time_span.total_seconds() / 3600
+
+                    if actual_hours >= 1.5:  # Au moins 1.5h pour M15
+                        logger.info("🔄 Tentative MTF limitée (M5 + M15 seulement)")
+                        # Continuer avec analyse limitée
+                    else:
+                        logger.info("❌ Passage en mode simple (M5 seulement)")
+                        return self._simple_mtf_analysis(df) if len(df) >= 50 else None
                 else:
-                    return None
+                    logger.info("❌ Pas de timestamps - Mode simple")
+                    return self._simple_mtf_analysis(df) if len(df) >= 50 else None
 
-            from multi_timeframe_analysis import MultiTimeframeAnalysis
-            mtf_analyzer = MultiTimeframeAnalysis()
+            try:
+                # 🆕 IMPORT AVEC GESTION D'ERREUR
+                from multi_timeframe_analysis import MultiTimeframeAnalysis
+                mtf_analyzer = MultiTimeframeAnalysis()
 
-            # Analyse complète multi-timeframes
-            result = mtf_analyzer.multi_timeframe_analysis(df)
+                logger.info("✅ Module MTF importé avec succès")
 
-            # Vérifier si le signal est tradable
-            should_trade = mtf_analyzer.should_trade(result)
-            result['valid_signal'] = should_trade
+                # 🆕 ANALYSE AVEC GESTION D'ERREUR DÉTAILLÉE
+                logger.info("🔄 Lancement analyse multi-timeframes...")
+                result = mtf_analyzer.multi_timeframe_analysis(df)
 
-            return result
+                # 🆕 VÉRIFICATION RÉSULTAT
+                if not result:
+                    logger.warning("❌ Analyse MTF retournée vide")
+                    return self._simple_mtf_analysis(df)
+
+                logger.info(f"✅ Analyse MTF terminée:")
+                logger.info(f"   📊 Confluence: {result.get('confluence_score', 0):.1%}")
+                logger.info(f"   📊 Direction: {result.get('direction', 'None')}")
+                logger.info(f"   📊 Force: {result.get('strength', 'None')}")
+
+                # Vérifier si le signal est tradable
+                should_trade = mtf_analyzer.should_trade(result)
+                result['valid_signal'] = should_trade
+
+                logger.info(f"   🎯 Signal valide: {should_trade}")
+
+                return result
+
+            except ImportError as e:
+                logger.error(f"❌ Erreur import MultiTimeframeAnalysis: {e}")
+                logger.info("🔄 Fallback vers mode simple")
+                return self._simple_mtf_analysis(df) if len(df) >= 50 else None
+
+            except Exception as e:
+                logger.error(f"❌ Erreur pendant analyse MTF: {e}")
+                logger.info("🔄 Fallback vers mode simple")
+                return self._simple_mtf_analysis(df) if len(df) >= 50 else None
 
         except Exception as e:
-            logger.error(f"Erreur analyse MTF: {e}")
-            # 🆕 FALLBACK vers mode simple
-            return self._simple_mtf_analysis(df) if len(df) >= 50 else None
+            logger.error(f"❌ Erreur critique analyse MTF: {e}")
+            import traceback
+            logger.error(f"📋 Traceback: {traceback.format_exc()}")
 
+            # 🆕 FALLBACK ROBUSTE vers mode simple
+            try:
+                return self._simple_mtf_analysis(df) if len(df) >= 50 else None
+            except Exception as fallback_error:
+                logger.error(f"❌ Erreur même en mode simple: {fallback_error}")
+                return None
     def _simple_mtf_analysis(self, df: pd.DataFrame) -> Dict:
         """🆕 ANALYSE MTF SIMPLIFIÉE pour données limitées"""
         try:
