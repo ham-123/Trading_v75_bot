@@ -24,8 +24,8 @@ st.set_page_config(
 )
 
 # Configuration de l'API
-API_BASE_URL = "http://localhost:8000"
-
+# API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = "http://dashboard-api:8000"
 
 class DashboardApp:
     def __init__(self):
@@ -73,7 +73,7 @@ class DashboardApp:
         # Auto-refresh
         if st.button("🔄 Actualiser", key="refresh_main"):
             st.session_state.clear()
-            st.experimental_rerun()
+            st.rerun()
 
         # Récupérer données principales
         dashboard_data = self.fetch_data("/api/dashboard", cache_seconds=10)
@@ -572,9 +572,8 @@ class DashboardApp:
 
         if auto_refresh:
             time.sleep(30)
-            st.experimental_rerun()
-
-        # Afficher la page sélectionnée
+            st.rerun()
+            # Afficher la page sélectionnée
         pages[selected_page]()
 
         # Footer
