@@ -61,15 +61,16 @@ class DerivAPI:
         os.makedirs('data', exist_ok=True)
 
     def _handle_tick_data(self, data):
-        """Traitement des données de tick reçues - CORRIGÉ"""
+        """Production tick handling - OPTIMISÉ"""
         try:
             tick = data['tick']
-
-            # 🆕 NOUVEAU: Créer l'objet tick avec toutes les colonnes nécessaires
             current_time = datetime.fromtimestamp(tick['epoch'], tz=timezone.utc)
             price = float(tick['quote'])
 
-            # Ajouter au buffer de ticks bruts
+            # ✅ PRODUCTION: Update ping time sur chaque tick
+            self.last_ping_time = time.time()
+
+            # Votre logique existante...
             tick_raw = {
                 'timestamp': current_time,
                 'price': price,
@@ -77,29 +78,48 @@ class DerivAPI:
             }
             self.tick_buffer.append(tick_raw)
 
-            # 🆕 CRÉATION DES DONNÉES OHLCV (Open, High, Low, Close, Volume)
             tick_data = self._create_ohlcv_data(current_time, price, tick)
-
             if tick_data:
-                # Ajouter au buffer principal
                 self.data_buffer.append(tick_data)
                 self.messages_received += 1
                 self.last_tick_time = current_time
 
-                # Maintenir la taille du buffer
+                # ✅ PRODUCTION: Sauvegarde plus fréquente pour ne pas perdre de données
+                if len(self.data_buffer) % 25 == 0:  # Toutes les 25 ticks au lieu de 50
+                    self._save_to_csv()
+
+                # Buffer management
                 if len(self.data_buffer) > self.max_buffer_size:
                     self.data_buffer = self.data_buffer[-self.max_buffer_size:]
 
-                # Log périodique
-                if self.messages_received % 100 == 0:
-                    logger.debug(f"📈 {self.messages_received} ticks reçus, prix actuel: {price}")
-
-                # Sauvegarder périodiquement (toutes les 50 ticks)
-                if len(self.data_buffer) % 50 == 0:
-                    self._save_to_csv()
+                # ✅ PRODUCTION: Log moins fréquent pour performance
+                if self.messages_received % 500 == 0:  # Toutes les 500 au lieu de 100
+                    logger.info(f"📈 PRODUCTION: {self.messages_received} ticks, prix: {price:.5f}")
 
         except Exception as e:
-            logger.error(f"Erreur traitement tick: {e}")
+            logger.error(f"PRODUCTION Tick error: {e}")
+
+            def get_connection_health(self) -> Dict:
+                """Vérifier la santé de la connexion PRODUCTION"""
+                current_time = time.time()
+
+                # Temps depuis dernier ping/tick
+                last_activity = getattr(self, 'last_ping_time', current_time)
+                time_since_activity = current_time - last_activity
+
+                health_status = {
+                    'connected': self.connected,
+                    'authenticated': self.authenticated,
+                    'messages_received': self.messages_received,
+                    'buffer_size': len(self.data_buffer),
+                    'time_since_last_activity': time_since_activity,
+                    'connection_stable': time_since_activity < 30,  # Stable si activité < 30s
+                    'reconnect_attempts': self.reconnect_attempts,
+                    'status': 'HEALTHY' if (self.connected and time_since_activity < 30) else 'UNSTABLE'
+                }
+
+                return health_status
+
 
     def _create_ohlcv_data(self, timestamp: datetime, price: float, tick_raw: dict) -> Optional[Dict]:
         """🆕 NOUVEAU: Créer les données OHLCV à partir des ticks"""
@@ -308,14 +328,39 @@ class DerivAPI:
             raise
 
     def _run_websocket(self):
-        """Exécuter la connexion WebSocket"""
+        """WebSocket pour PRODUCTION - Paramètres optimisés"""
         try:
             self.ws.run_forever(
-                ping_interval=30,  # Ping toutes les 30 secondes
-                ping_timeout=10  # Timeout de 10 secondes
+                ping_interval=15,  # ✅ PRODUCTION: Plus fréquent pour stabilité
+                ping_timeout=6,  # ✅ PRODUCTION: Timeout réduit pour détection rapide
+                ping_payload=b"vol75_keepalive",  # ✅ Payload unique
+                close_timeout=10  # ✅ NOUVEAU: Timeout fermeture propre
             )
         except Exception as e:
-            logger.error(f"Erreur WebSocket thread: {e}")
+            logger.error(f"WebSocket production error: {e}")
+
+    def _on_open(self, ws):
+        """Connexion PRODUCTION - Séquence optimisée"""
+        logger.info("📡 WebSocket PRODUCTION connecté")
+        self.connected = True
+        self.reconnect_attempts = 0
+        self.last_ping_time = time.time()  # ✅ NOUVEAU: Tracking ping
+
+        # ✅ PRODUCTION: Délai de stabilisation
+        import time
+        time.sleep(0.8)
+
+        # Auth + Subscribe avec gestion d'erreur
+        try:
+            if self.token:
+                self._authenticate()
+                time.sleep(0.3)  # Délai auth
+
+            self._subscribe_to_vol75()
+            logger.info("🔥 Bot PRODUCTION prêt pour trading")
+
+        except Exception as e:
+            logger.error(f"Erreur initialisation production: {e}")
 
     def _on_open(self, ws):
         """Callback à l'ouverture de connexion"""
@@ -425,21 +470,40 @@ class DerivAPI:
             logger.error("❌ Maximum de tentatives de reconnexion atteint")
 
     def _schedule_reconnect(self):
-        """Programmer une reconnexion"""
+        """Reconnexion PRODUCTION - Stratégie agressive"""
         self.reconnect_attempts += 1
-        delay = min(2 ** self.reconnect_attempts, 60)  # Backoff exponentiel, max 60s
 
-        logger.info(f"🔄 Reconnexion #{self.reconnect_attempts} dans {delay}s...")
+        # ✅ PRODUCTION: Reconnexion plus agressive pour minimiser downtime
+        if self.reconnect_attempts <= 3:
+            delay = 2  # Reconnexion immédiate pour les 3 premières
+        elif self.reconnect_attempts <= 6:
+            delay = 5  # Puis 5s
+        else:
+            delay = min(10 + (self.reconnect_attempts - 6) * 2, 30)  # Puis escalade
+
+        logger.warning(f"🔄 PRODUCTION Reconnexion #{self.reconnect_attempts} dans {delay}s")
 
         def reconnect():
             import time
             time.sleep(delay)
-            # Utiliser asyncio.run au lieu de create_task
             try:
+                # ✅ Nettoyage complet avant reconnexion
+                if self.ws:
+                    try:
+                        self.ws.close()
+                        self.ws = None
+                    except:
+                        pass
+
+                # ✅ Reset état
+                self.connected = False
+                self.authenticated = False
+
                 import asyncio
                 asyncio.run(self.connect())
+
             except Exception as e:
-                logger.error(f"Erreur reconnexion: {e}")
+                logger.error(f"PRODUCTION Reconnexion failed: {e}")
 
         threading.Thread(target=reconnect, daemon=True).start()
 
@@ -500,7 +564,7 @@ class DerivAPI:
             logger.error(f"❌ Erreur critique récupération historique: {e}")
             return None
 
-    async def get_latest_data(self, count: int = 200) -> Optional[pd.DataFrame]:
+    async def get_latest_data(self, count: int = 2000) -> Optional[pd.DataFrame]:
         """Récupérer les dernières données sous forme de DataFrame"""
         try:
             if len(self.data_buffer) < 10:

@@ -71,7 +71,7 @@ class MultiTimeframeAnalysis:
             logger.info(f"   ⏱️ Plage temporelle: {hours:.2f} heures")
 
             # 🆕 VÉRIFICATION SEUILS MINIMUM
-            min_hours_needed = {'15min': 1.0, '1h': 3.0}
+            min_hours_needed = {'15min': 0.5, '1h': 1.5}
             min_hours = min_hours_needed.get(timeframe, 1.0)
 
             if hours < min_hours:

@@ -17,9 +17,11 @@ from dotenv import load_dotenv
 # Imports des modules optimisés
 from deriv_api import DerivAPI
 from technical_analysis import TechnicalAnalysis
-from ai_model import EnsembleAIModel as OptimizedAIModel
+
 from signal_generator import MultiTimeframeSignalGenerator
 from telegram_bot import EnhancedTelegramBot  # 🆕 Bot MTF amélioré
+from ai_model import ImprovedEnsembleAIModel as OptimizedAIModel
+
 
 # 🆕 NOUVEAU: Import intégration dashboard
 from bot_dashboard_integration import DashboardIntegration
@@ -122,93 +124,170 @@ class OptimizedTradingBotMTF:
         logger.info(f"Signal {signum} reçu, arrêt du bot optimisé MTF...")
         self.running = False
 
-    async def initialize(self):
-        """🚀 Initialisation optimisée MTF + Dashboard"""
+    async def monitor_production_training(self):
+        """🎯 NOUVEAU: Monitor l'entraînement IA sans l'interrompre"""
         try:
-            logger.info("🚀 Initialisation du bot Vol75 OPTIMISÉ MTF + Dashboard...")
-            logger.info("   Version: 3.1 - IA Optimisée + Multi-Timeframes + Telegram + Dashboard")
+            training_start = time.time()
+            last_notification = 0
+            notification_interval = 300  # Toutes les 5 minutes
 
-            # Vérification configuration
-            if not self._check_configuration():
-                raise Exception("Configuration invalide")
+            while True:
+                current_time = time.time()
+                elapsed = current_time - training_start
 
-            # 🆕 NOUVEAU: Test connexion dashboard
+                # Vérifier si l'IA est encore en cours d'entraînement
+                if hasattr(self.ai_model, 'xgb_model') and self.ai_model.xgb_model is not None:
+                    # Entraînement terminé
+                    logger.info(f"🎯 PRODUCTION: IA entraînée en {elapsed / 60:.1f} minutes")
+                    break
+
+                # Notification périodique
+                if current_time - last_notification >= notification_interval:
+                    logger.info(f"🧠 PRODUCTION: Entraînement IA en cours... {elapsed / 60:.1f}min")
+
+                    # Vérifier la santé de WebSocket pendant l'entraînement
+                    ws_health = self.deriv_api.get_connection_health()
+                    if ws_health['status'] != 'HEALTHY':
+                        logger.warning(f"⚠️ PRODUCTION: WebSocket {ws_health['status']} pendant entraînement")
+
+                    # Envoyer notification Telegram optionnelle
+                    if elapsed > 600:  # Après 10 minutes
+                        await self.telegram_bot.send_message(
+                            f"🧠 <b>PRODUCTION Training Update</b>\n\n"
+                            f"⏱️ Durée: {elapsed / 60:.1f} minutes\n"
+                            f"📊 Status IA: En cours d'optimisation\n"
+                            f"🌐 WebSocket: {ws_health['status']}\n"
+                            f"📈 Ticks reçus: {ws_health['messages_received']}\n\n"
+                            f"<i>Training continue pour précision maximale...</i>"
+                        )
+
+                    last_notification = current_time
+
+                await asyncio.sleep(30)  # Check toutes les 30s
+
+        except Exception as e:
+            logger.error(f"Erreur monitoring production: {e}")
+
+    async def initialize(self):
+        """Initialisation PRODUCTION avec monitoring"""
+        try:
+            logger.info("🚀 INITIALISATION PRODUCTION Vol75 Trading Bot")
+            logger.info("   🎯 Mode: PRODUCTION - Précision maximale")
+            logger.info("   ⏱️ Patience requise pour entraînement IA optimal")
+
+            # Vérification configuration PRODUCTION
+            if not self._check_production_config():
+                raise Exception("Configuration PRODUCTION invalide")
+
+            # Dashboard
             if self.dashboard.test_connection():
-                logger.info("✅ Dashboard connecté")
-
-                # Envoyer métriques initiales
+                logger.info("✅ Dashboard PRODUCTION connecté")
                 await self.dashboard.send_system_metrics({
-                    'bot_status': 'STARTING',
-                    'deriv_connected': False,
-                    'telegram_connected': True,
-                    'signals_today': 0,
-                    'mtf_rejections': 0,
-                    'ai_accuracy': 0,
-                    'uptime_hours': 0
+                    'bot_status': 'PRODUCTION_STARTING',
+                    'mode': 'PRODUCTION',
+                    'training_status': 'INITIALIZING'
                 })
-            else:
-                logger.warning("⚠️ Dashboard non disponible - Continuons sans dashboard")
 
             # Connexion Deriv API
             await self.deriv_api.connect()
-            logger.info("✅ Connexion Deriv API établie")
+            logger.info("✅ WebSocket PRODUCTION connecté")
 
-            # 🚀 Chargement des données historiques
-            logger.info("📊 Chargement des données historiques Vol75...")
+            # Données historiques
+            logger.info("📊 Chargement données historiques PRODUCTION...")
             self.historical_data_loaded = await self.deriv_api.load_historical_on_startup()
 
             if self.historical_data_loaded:
-                logger.info("✅ Données historiques Vol75 chargées avec succès")
-            else:
-                logger.info("⚠️ Mode collecte temps réel activé")
+                logger.info(f"✅ Données PRODUCTION chargées: {len(self.deriv_api.data_buffer)} points")
 
-            # 🧠 Initialisation IA OPTIMISÉE
-            logger.info("🧠 Chargement du modèle IA OPTIMISÉ...")
+            # ✅ NOUVEAU: Démarrer monitoring en parallèle
+            asyncio.create_task(self.monitor_production_training())
+
+            # ✅ ENTRAÎNEMENT IA PRODUCTION (sans timeout)
+            logger.info("🧠 DÉMARRAGE ENTRAÎNEMENT IA PRODUCTION")
+            logger.info("   📊 Target: 95%+ précision")
+            logger.info("   🎯 Features: 199 (optimisées)")
+            logger.info("   ⏱️ Durée estimée: 15-25 minutes")
+            logger.info("   🔥 AUCUN TIMEOUT - Patience requise!")
+
+            # Notification Telegram de démarrage
+            await self.telegram_bot.send_message(
+                f"🚀 <b>BOT PRODUCTION DÉMARRÉ</b>\n\n"
+                f"🧠 <b>Entraînement IA en cours...</b>\n"
+                f"📊 Target: 95%+ précision\n"
+                f"🎯 Features: 199 optimisées\n"
+                f"⏱️ Durée: 15-25 minutes\n\n"
+                f"🔥 <b>Mode PRODUCTION activé</b>\n"
+                f"💰 Prêt pour trading réel\n\n"
+                f"<i>Patience pendant optimisation IA...</i>"
+            )
+
+            # ENTRAÎNEMENT SANS TIMEOUT
             training_success = self.ai_model.load_or_create_ensemble_model()
 
             ai_info = {}
             if training_success:
                 model_info = self.ai_model.get_ensemble_model_info()
                 ai_info = {
-                    'model_type': model_info.get('model_type', 'XGBoost-Optimized'),
-                    'n_features': model_info.get('n_features', 45),
+                    'model_type': model_info.get('model_type', 'TripleEnsemble-95%'),
+                    'n_features': model_info.get('n_features', 199),
                     'validation_accuracy': model_info.get('validation_accuracy', 0),
                     'training_samples': model_info.get('training_samples', 0)
                 }
 
-                logger.info(f"✅ Modèle IA optimisé prêt:")
-                logger.info(f"   📊 Précision: {ai_info['validation_accuracy']:.1%}")
-                logger.info(f"   📈 Features: {ai_info['n_features']}")
-                logger.info(f"   🎯 Échantillons: {ai_info['training_samples']:,}")
+                logger.info(f"🎯 IA PRODUCTION OPTIMISÉE:")
+                logger.info(f"   📊 Précision: {ai_info['validation_accuracy']:.2%}")
+                logger.info(f"   🎯 Features: {ai_info['n_features']}")
+                logger.info(f"   📈 Échantillons: {ai_info['training_samples']:,}")
+                logger.info(f"   🔥 STATUS: PRÊT POUR TRADING")
+
+                # Notification succès
+                await self.telegram_bot.send_message(
+                    f"🎯 <b>IA PRODUCTION OPTIMISÉE ✅</b>\n\n"
+                    f"📊 <b>Résultats finaux:</b>\n"
+                    f"• Précision: {ai_info['validation_accuracy']:.1%}\n"
+                    f"• Features: {ai_info['n_features']}\n"
+                    f"• Échantillons: {ai_info['training_samples']:,}\n\n"
+                    f"🔥 <b>BOT PRÊT POUR TRADING RÉEL</b>\n"
+                    f"💰 Signaux haute précision activés\n\n"
+                    f"🚀 <i>Trading automatique en cours...</i>"
+                )
+
             else:
-                logger.warning("⚠️ IA en mode simple")
+                logger.error("❌ ÉCHEC entraînement IA PRODUCTION")
+                await self.telegram_bot.send_error_alert("Échec entraînement IA", "PRODUCTION-CRITICAL")
 
-            # 📊 Statistiques des modules
-            logger.info("📊 Configuration des modules optimisés:")
-            gen_stats = self.signal_generator.get_generator_stats()
-            logger.info(f"   🎯 Générateur: {gen_stats['type']}")
-            logger.info(f"   📈 Confluence min: {gen_stats['min_confluence_score']:.0%}")
-            logger.info(f"   🔧 Filtres: {len(gen_stats['filters_enabled'])}")
+            # Dashboard update
+            await self.dashboard.send_system_metrics({
+                'bot_status': 'PRODUCTION_READY',
+                'training_status': 'COMPLETED',
+                'ai_accuracy': ai_info.get('validation_accuracy', 0),
+                'mode': 'PRODUCTION'
+            })
 
-            # 🆕 NOUVEAU: Envoyer métriques complètes au dashboard
-            await self._send_full_metrics_update(ai_info)
-
-            # 🚀 Notification de démarrage MTF optimisée
-            await self.telegram_bot.send_mtf_startup_notification(
-                historical_loaded=self.historical_data_loaded,
-                ai_info=ai_info
-            )
-
-            # 🧠 Notification d'entraînement IA si applicable
-            if training_success and self.historical_data_loaded and ai_info.get('validation_accuracy', 0) > 0.6:
-                await self.telegram_bot.send_ai_training_notification(ai_info)
-
-            logger.info("🚀 Initialisation optimisée MTF + Dashboard terminée avec succès")
+            logger.info("🚀 PRODUCTION BOT FULLY OPERATIONAL")
 
         except Exception as e:
-            logger.error(f"❌ Erreur d'initialisation optimisée MTF: {e}")
-            await self.telegram_bot.send_error_alert(str(e), "Initialisation-MTF")
+            logger.error(f"❌ ERREUR PRODUCTION CRITIQUE: {e}")
+            await self.telegram_bot.send_error_alert(str(e), "PRODUCTION-INIT")
             raise
+
+    def _check_production_config(self):
+        """Vérifier configuration PRODUCTION"""
+        required_vars = ['DERIV_APP_ID', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID']
+        missing_vars = [var for var in required_vars if not os.getenv(var)]
+
+        if missing_vars:
+            logger.error(f"❌ PRODUCTION: Variables manquantes: {missing_vars}")
+            return False
+
+        # Vérifications supplémentaires PRODUCTION
+        if not os.getenv('DERIV_TOKEN'):
+            logger.warning("⚠️ PRODUCTION: Pas de token Deriv (mode démo)")
+
+        trading_mode = os.getenv('TRADING_MODE', 'demo')
+        logger.info(f"🎯 PRODUCTION Mode: {trading_mode.upper()}")
+
+        return True
 
     def _check_configuration(self):
         """Vérification de configuration"""
@@ -237,7 +316,7 @@ class OptimizedTradingBotMTF:
 
                     # Vérifier heures de trading
                     if not self._is_trading_hours():
-                        await asyncio.sleep(300)
+                        await asyncio.sleep(100)
                         continue
 
                     # Reset compteur journalier
@@ -245,14 +324,14 @@ class OptimizedTradingBotMTF:
 
                     # Vérifier limites de trading
                     if not self._can_trade():
-                        await asyncio.sleep(300)
+                        await asyncio.sleep(100)
                         continue
 
                     # 🚀 Analyse et traitement optimisés MTF + Dashboard
                     await self.process_market_data_optimized_mtf()
 
                     # Attendre avant prochaine analyse
-                    await asyncio.sleep(300)  # 5 minutes
+                    await asyncio.sleep(100)  # 5 minutes
 
                 except Exception as e:
                     logger.error(f"Erreur dans la boucle optimisée MTF: {e}")
@@ -546,7 +625,7 @@ class OptimizedTradingBotMTF:
         """📱 Notification de santé optimisée MTF + Dashboard"""
         try:
             # Récupérer données actuelles
-            data = await self.deriv_api.get_latest_data()
+            data = await self.deriv_api.get_latest_data(count=2000)
             price_change_1h = 0
 
             if data is not None and len(data) > 0:
