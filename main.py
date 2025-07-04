@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Bot Trading Vol75 OPTIMISÉ - Point d'entrée principal
-🚀 VERSION 3.1: IA Optimisée + Multi-Timeframes Analysis + Telegram MTF + Dashboard
+Bot Trading Vol75 RECONSTRUIT - Point d'entrée principal
+🚀 VERSION 3.1 COMPLÈTE: IA Optimisée + Multi-Timeframes + Dashboard + Telegram
 """
 
 import asyncio
@@ -10,21 +10,26 @@ import time
 import os
 import signal
 import sys
+import pandas as pd  # ✅ AJOUT IMPORT PANDAS MANQUANT
 from datetime import datetime, timezone
-from typing import Dict
+from typing import Dict, Optional
 from dotenv import load_dotenv
 
 # Imports des modules optimisés
 from deriv_api import DerivAPI
 from technical_analysis import TechnicalAnalysis
-
 from signal_generator import MultiTimeframeSignalGenerator
-from telegram_bot import EnhancedTelegramBot  # 🆕 Bot MTF amélioré
-from ai_model import ImprovedEnsembleAIModel as OptimizedAIModel
+from telegram_bot import EnhancedTelegramBot
+from ai_model import ImprovedEnsembleAIModel
 
+# Import intégration dashboard
+try:
+    from bot_dashboard_integration import DashboardIntegration
 
-# 🆕 NOUVEAU: Import intégration dashboard
-from bot_dashboard_integration import DashboardIntegration
+    DASHBOARD_AVAILABLE = True
+except ImportError:
+    DASHBOARD_AVAILABLE = False
+    logging.warning("⚠️ Module dashboard non disponible")
 
 # Charger les variables d'environnement
 load_dotenv()
@@ -55,65 +60,62 @@ def setup_logging():
         logging.getLogger('urllib3').setLevel(logging.WARNING)
         logging.getLogger('httpx').setLevel(logging.WARNING)
 
+    logging.info("📋 Système de logs configuré")
+
 
 logger = logging.getLogger(__name__)
 
 
 class OptimizedTradingBotMTF:
-    """🚀 Bot de trading Vol75 OPTIMISÉ avec MTF Telegram détaillé + Dashboard"""
+    """🚀 Bot de trading Vol75 RECONSTRUIT avec MTF + Dashboard + IA Optimisée"""
 
     def __init__(self):
         """Initialisation du bot optimisé MTF + Dashboard"""
-        # 🆕 Modules optimisés avec Telegram MTF + Dashboard
+        # Modules principaux
         self.deriv_api = DerivAPI()
         self.technical_analysis = TechnicalAnalysis()
-        self.ai_model = OptimizedAIModel()
+        self.ai_model = ImprovedEnsembleAIModel()
         self.signal_generator = MultiTimeframeSignalGenerator()
-        self.telegram_bot = EnhancedTelegramBot()  # 🆕 Bot MTF détaillé
+        self.telegram_bot = EnhancedTelegramBot()
 
-        # 🆕 NOUVEAU: Intégration Dashboard
-        self.dashboard = DashboardIntegration()
+        # Dashboard (optionnel)
+        if DASHBOARD_AVAILABLE:
+            self.dashboard = DashboardIntegration()
+        else:
+            self.dashboard = None
 
         # Variables de contrôle
-        self.last_signal_time = 0
-        self.consecutive_losses = 0
-        self.daily_trades = 0
-        self.last_trade_date = None
         self.running = True
-
-        # Variables de monitoring optimisées MTF
         self.start_time = datetime.now()
-        self.last_health_notification = 0
-        self.health_interval = 3600  # 1 heure
-        self.signals_today = 0
-        self.last_signal_time_obj = None
-        self.current_price = 0
-        self.historical_data_loaded = False
 
-        # 🆕 Statistiques MTF avancées
+        # Compteurs et statistiques
+        self.signals_today = 0
         self.premium_signals = 0
         self.high_quality_signals = 0
         self.mtf_rejections = 0
         self.ai_predictions_today = 0
-        self.daily_mtf_stats = {
-            'confluence_scores': [],
-            'h1_signals': 0,
-            'm15_signals': 0,
-            'm5_signals': 0,
-            'avg_confluence': 0,
-            'best_confluence': 0
-        }
+        self.consecutive_losses = 0
+        self.daily_trades = 0
+        self.last_trade_date = None
+        self.last_signal_time = 0
+        self.last_signal_time_obj = None
+        self.current_price = 0.0
 
-        # 🆕 NOUVEAU: Variables pour dashboard
+        # Configuration depuis .env
+        self.signal_interval = int(os.getenv('SIGNAL_INTERVAL', 1080))  # 18 minutes
+        self.max_daily_trades = int(os.getenv('MAX_DAILY_TRADES', 12))
+        self.max_consecutive_losses = int(os.getenv('MAX_CONSECUTIVE_LOSSES', 3))
+
+        # Monitoring
+        self.last_health_notification = 0
+        self.health_interval = 3600  # 1 heure
+        self.historical_data_loaded = False
+
+        # Dashboard metrics
         self._last_metrics_update = 0
         self._last_price_update = 0
 
-        # Paramètres de configuration
-        self.signal_interval = int(os.getenv('SIGNAL_INTERVAL', 3600))
-        self.max_daily_trades = int(os.getenv('MAX_DAILY_TRADES', 6))
-        self.max_consecutive_losses = int(os.getenv('MAX_CONSECUTIVE_LOSSES', 3))
-
-        # Setup signal handlers
+        # Setup signal handlers pour arrêt propre
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
@@ -121,202 +123,145 @@ class OptimizedTradingBotMTF:
 
     def _signal_handler(self, signum, frame):
         """Gestionnaire d'arrêt propre"""
-        logger.info(f"Signal {signum} reçu, arrêt du bot optimisé MTF...")
+        logger.info(f"Signal {signum} reçu, arrêt du bot...")
         self.running = False
 
-    async def monitor_production_training(self):
-        """🎯 NOUVEAU: Monitor l'entraînement IA sans l'interrompre"""
-        try:
-            training_start = time.time()
-            last_notification = 0
-            notification_interval = 300  # Toutes les 5 minutes
-
-            while True:
-                current_time = time.time()
-                elapsed = current_time - training_start
-
-                # Vérifier si l'IA est encore en cours d'entraînement
-                if hasattr(self.ai_model, 'xgb_model') and self.ai_model.xgb_model is not None:
-                    # Entraînement terminé
-                    logger.info(f"🎯 PRODUCTION: IA entraînée en {elapsed / 60:.1f} minutes")
-                    break
-
-                # Notification périodique
-                if current_time - last_notification >= notification_interval:
-                    logger.info(f"🧠 PRODUCTION: Entraînement IA en cours... {elapsed / 60:.1f}min")
-
-                    # Vérifier la santé de WebSocket pendant l'entraînement
-                    ws_health = self.deriv_api.get_connection_health()
-                    if ws_health['status'] != 'HEALTHY':
-                        logger.warning(f"⚠️ PRODUCTION: WebSocket {ws_health['status']} pendant entraînement")
-
-                    # Envoyer notification Telegram optionnelle
-                    if elapsed > 600:  # Après 10 minutes
-                        await self.telegram_bot.send_message(
-                            f"🧠 <b>PRODUCTION Training Update</b>\n\n"
-                            f"⏱️ Durée: {elapsed / 60:.1f} minutes\n"
-                            f"📊 Status IA: En cours d'optimisation\n"
-                            f"🌐 WebSocket: {ws_health['status']}\n"
-                            f"📈 Ticks reçus: {ws_health['messages_received']}\n\n"
-                            f"<i>Training continue pour précision maximale...</i>"
-                        )
-
-                    last_notification = current_time
-
-                await asyncio.sleep(30)  # Check toutes les 30s
-
-        except Exception as e:
-            logger.error(f"Erreur monitoring production: {e}")
-
     async def initialize(self):
-        """Initialisation PRODUCTION avec monitoring"""
+        """Initialisation COMPLÈTE du bot"""
         try:
-            logger.info("🚀 INITIALISATION PRODUCTION Vol75 Trading Bot")
-            logger.info("   🎯 Mode: PRODUCTION - Précision maximale")
-            logger.info("   ⏱️ Patience requise pour entraînement IA optimal")
+            logger.info("🚀 INITIALISATION Bot Vol75 Trading MTF")
+            logger.info("   🎯 Mode: Multi-Timeframes Analysis")
+            logger.info("   🧠 IA: Ensemble XGBoost + LightGBM")
+            logger.info("   📊 Dashboard: Temps réel")
 
-            # Vérification configuration PRODUCTION
-            if not self._check_production_config():
-                raise Exception("Configuration PRODUCTION invalide")
+            # Vérifier configuration
+            if not self._check_configuration():
+                raise Exception("Configuration invalide")
 
-            # Dashboard
-            if self.dashboard.test_connection():
-                logger.info("✅ Dashboard PRODUCTION connecté")
-                await self.dashboard.send_system_metrics({
-                    'bot_status': 'PRODUCTION_STARTING',
-                    'mode': 'PRODUCTION',
-                    'training_status': 'INITIALIZING'
+            # ÉTAPE 1: Dashboard
+            if self.dashboard and self.dashboard.test_connection():
+                logger.info("✅ Dashboard connecté")
+                await self.dashboard.send_startup_notification({
+                    'version': '3.1-MTF',
+                    'trading_mode': os.getenv('TRADING_MODE', 'demo'),
+                    'capital': os.getenv('CAPITAL', 1000),
+                    'mtf_enabled': True
                 })
+            else:
+                logger.warning("⚠️ Dashboard non disponible")
 
-            # Connexion Deriv API
+            # ÉTAPE 2: Connexion Deriv API
+            logger.info("🔌 Connexion à Deriv API...")
             await self.deriv_api.connect()
-            logger.info("✅ WebSocket PRODUCTION connecté")
+            logger.info("✅ WebSocket Deriv connecté")
 
-            # Données historiques
-            logger.info("📊 Chargement données historiques PRODUCTION...")
+            # ÉTAPE 3: Chargement données historiques
+            logger.info("📊 Chargement données historiques...")
             self.historical_data_loaded = await self.deriv_api.load_historical_on_startup()
 
             if self.historical_data_loaded:
-                logger.info(f"✅ Données PRODUCTION chargées: {len(self.deriv_api.data_buffer)} points")
+                data_count = len(getattr(self.deriv_api, 'data_buffer', []))
+                logger.info(f"✅ Données historiques chargées: {data_count} points")
+            else:
+                logger.warning("⚠️ Pas de données historiques, mode temps réel")
 
-            # ✅ NOUVEAU: Démarrer monitoring en parallèle
-            asyncio.create_task(self.monitor_production_training())
-
-            # ✅ ENTRAÎNEMENT IA PRODUCTION (sans timeout)
-            logger.info("🧠 DÉMARRAGE ENTRAÎNEMENT IA PRODUCTION")
-            logger.info("   📊 Target: 95%+ précision")
-            logger.info("   🎯 Features: 199 (optimisées)")
-            logger.info("   ⏱️ Durée estimée: 15-25 minutes")
-            logger.info("   🔥 AUCUN TIMEOUT - Patience requise!")
+            # ÉTAPE 4: Entraînement IA
+            logger.info("🧠 Initialisation modèle IA...")
+            logger.info("   🎯 Target: Précision 90%+")
+            logger.info("   📊 Features: 85+ optimisées")
+            logger.info("   ⏱️ Patience requise pour entraînement optimal...")
 
             # Notification Telegram de démarrage
-            await self.telegram_bot.send_message(
-                f"🚀 <b>BOT PRODUCTION DÉMARRÉ</b>\n\n"
-                f"🧠 <b>Entraînement IA en cours...</b>\n"
-                f"📊 Target: 95%+ précision\n"
-                f"🎯 Features: 199 optimisées\n"
-                f"⏱️ Durée: 15-25 minutes\n\n"
-                f"🔥 <b>Mode PRODUCTION activé</b>\n"
-                f"💰 Prêt pour trading réel\n\n"
-                f"<i>Patience pendant optimisation IA...</i>"
-            )
+            await self.telegram_bot.send_startup_message()
 
-            # ENTRAÎNEMENT SANS TIMEOUT
+            # Entraînement IA (peut prendre du temps)
             training_success = self.ai_model.load_or_create_ensemble_model()
 
             ai_info = {}
             if training_success:
                 model_info = self.ai_model.get_ensemble_model_info()
                 ai_info = {
-                    'model_type': model_info.get('model_type', 'TripleEnsemble-95%'),
-                    'n_features': model_info.get('n_features', 199),
+                    'model_type': model_info.get('model_type', 'EnsembleAI'),
+                    'n_features': model_info.get('n_features', 85),
                     'validation_accuracy': model_info.get('validation_accuracy', 0),
                     'training_samples': model_info.get('training_samples', 0)
                 }
 
-                logger.info(f"🎯 IA PRODUCTION OPTIMISÉE:")
+                logger.info(f"🎯 IA OPTIMISÉE PRÊTE:")
                 logger.info(f"   📊 Précision: {ai_info['validation_accuracy']:.2%}")
                 logger.info(f"   🎯 Features: {ai_info['n_features']}")
                 logger.info(f"   📈 Échantillons: {ai_info['training_samples']:,}")
-                logger.info(f"   🔥 STATUS: PRÊT POUR TRADING")
 
-                # Notification succès
-                await self.telegram_bot.send_message(
-                    f"🎯 <b>IA PRODUCTION OPTIMISÉE ✅</b>\n\n"
-                    f"📊 <b>Résultats finaux:</b>\n"
-                    f"• Précision: {ai_info['validation_accuracy']:.1%}\n"
-                    f"• Features: {ai_info['n_features']}\n"
-                    f"• Échantillons: {ai_info['training_samples']:,}\n\n"
-                    f"🔥 <b>BOT PRÊT POUR TRADING RÉEL</b>\n"
-                    f"💰 Signaux haute précision activés\n\n"
-                    f"🚀 <i>Trading automatique en cours...</i>"
-                )
-
+                # Notification Telegram succès IA
+                await self.telegram_bot.send_ai_training_notification(ai_info)
             else:
-                logger.error("❌ ÉCHEC entraînement IA PRODUCTION")
-                await self.telegram_bot.send_error_alert("Échec entraînement IA", "PRODUCTION-CRITICAL")
+                logger.error("❌ ÉCHEC entraînement IA")
+                await self.telegram_bot.send_error_alert("Échec entraînement IA", "CRITIQUE")
 
-            # Dashboard update
-            await self.dashboard.send_system_metrics({
-                'bot_status': 'PRODUCTION_READY',
-                'training_status': 'COMPLETED',
-                'ai_accuracy': ai_info.get('validation_accuracy', 0),
-                'mode': 'PRODUCTION'
-            })
+            # ÉTAPE 5: Notification démarrage complète
+            await self.telegram_bot.send_mtf_startup_notification(
+                historical_loaded=self.historical_data_loaded,
+                ai_info=ai_info
+            )
 
-            logger.info("🚀 PRODUCTION BOT FULLY OPERATIONAL")
+            # Dashboard update final
+            if self.dashboard:
+                await self.dashboard.send_system_metrics({
+                    'bot_status': 'RUNNING',
+                    'deriv_connected': True,
+                    'telegram_connected': True,
+                    'ai_accuracy': ai_info.get('validation_accuracy', 0),
+                    'signals_today': 0,
+                    'mtf_rejections': 0,
+                    'uptime_hours': 0
+                })
+
+            logger.info("🚀 BOT COMPLÈTEMENT OPÉRATIONNEL")
 
         except Exception as e:
-            logger.error(f"❌ ERREUR PRODUCTION CRITIQUE: {e}")
-            await self.telegram_bot.send_error_alert(str(e), "PRODUCTION-INIT")
+            logger.error(f"❌ ERREUR CRITIQUE INITIALISATION: {e}")
+            await self.telegram_bot.send_error_alert(str(e), "INIT-CRITIQUE")
             raise
 
-    def _check_production_config(self):
-        """Vérifier configuration PRODUCTION"""
+    def _check_configuration(self) -> bool:
+        """Vérifier la configuration du bot"""
         required_vars = ['DERIV_APP_ID', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID']
         missing_vars = [var for var in required_vars if not os.getenv(var)]
 
         if missing_vars:
-            logger.error(f"❌ PRODUCTION: Variables manquantes: {missing_vars}")
+            logger.error(f"❌ Variables d'environnement manquantes: {missing_vars}")
             return False
 
-        # Vérifications supplémentaires PRODUCTION
-        if not os.getenv('DERIV_TOKEN'):
-            logger.warning("⚠️ PRODUCTION: Pas de token Deriv (mode démo)")
-
+        # Log configuration
         trading_mode = os.getenv('TRADING_MODE', 'demo')
-        logger.info(f"🎯 PRODUCTION Mode: {trading_mode.upper()}")
+        capital = os.getenv('CAPITAL', 1000)
+        risk_amount = os.getenv('RISK_AMOUNT', 10)
 
-        return True
+        logger.info(f"🔧 Configuration:")
+        logger.info(f"   Mode: {trading_mode.upper()}")
+        logger.info(f"   Capital: {capital}$")
+        logger.info(f"   Risque/trade: {risk_amount}$")
 
-    def _check_configuration(self):
-        """Vérification de configuration"""
-        required_vars = ['DERIV_APP_ID', 'TELEGRAM_TOKEN', 'TELEGRAM_CHAT_ID']
-        missing_vars = [var for var in required_vars if not os.getenv(var)]
-
-        if missing_vars:
-            logger.error(f"Variables manquantes: {missing_vars}")
-            return False
         return True
 
     async def run(self):
-        """🚀 Boucle principale optimisée MTF + Dashboard"""
+        """🚀 Boucle principale du bot"""
         try:
             await self.initialize()
-            logger.info("🔄 Démarrage de la boucle principale OPTIMISÉE MTF + Dashboard...")
+            logger.info("🔄 Démarrage de la boucle principale MTF...")
 
             while self.running:
                 try:
                     current_time = time.time()
 
-                    # Notification de santé horaire MTF
+                    # Notification de santé périodique
                     if current_time - self.last_health_notification >= self.health_interval:
-                        await self.send_mtf_health_notification()
+                        await self.send_health_notification()
                         self.last_health_notification = current_time
 
                     # Vérifier heures de trading
                     if not self._is_trading_hours():
-                        await asyncio.sleep(100)
+                        await asyncio.sleep(60)  # Attendre 1 minute
                         continue
 
                     # Reset compteur journalier
@@ -324,40 +269,122 @@ class OptimizedTradingBotMTF:
 
                     # Vérifier limites de trading
                     if not self._can_trade():
-                        await asyncio.sleep(100)
+                        await asyncio.sleep(60)  # Attendre 1 minute
                         continue
 
-                    # 🚀 Analyse et traitement optimisés MTF + Dashboard
-                    await self.process_market_data_optimized_mtf()
+                    # 🚀 ANALYSE ET TRAITEMENT PRINCIPAL
+                    await self.process_market_data()
 
                     # Attendre avant prochaine analyse
-                    await asyncio.sleep(100)  # 5 minutes
+                    await asyncio.sleep(30)  # 30 secondes entre analyses
 
                 except Exception as e:
-                    logger.error(f"Erreur dans la boucle optimisée MTF: {e}")
-                    await asyncio.sleep(60)
+                    logger.error(f"❌ Erreur dans la boucle principale: {e}")
+                    await asyncio.sleep(60)  # Attendre 1 minute avant retry
 
         except KeyboardInterrupt:
-            logger.info("Arrêt du bot optimisé MTF demandé")
+            logger.info("Arrêt du bot demandé par l'utilisateur")
         except Exception as e:
-            logger.error(f"Erreur critique bot optimisé MTF: {e}")
-            await self.telegram_bot.send_error_alert(str(e), "Système-MTF")
+            logger.error(f"❌ Erreur critique boucle principale: {e}")
+            await self.telegram_bot.send_error_alert(str(e), "BOUCLE-CRITIQUE")
         finally:
-            await self.cleanup_optimized_mtf()
+            await self.cleanup()
 
-    async def process_market_data_optimized_mtf(self):
-        """🚀 Traitement OPTIMISÉ MTF des données de marché + Dashboard"""
+    async def process_market_data(self):
+        """🚀 TRAITEMENT PRINCIPAL des données de marché"""
         try:
             # Récupérer données récentes
             data = await self.deriv_api.get_latest_data()
             if data is None or len(data) < 100:
-                logger.debug("Pas assez de données pour analyse optimisée MTF")
+                logger.debug("❌ Pas assez de données pour analyse")
                 return
 
             self.current_price = float(data['price'].iloc[-1])
-            logger.debug(f"🔍 Analyse optimisée MTF: {len(data)} points (prix: {self.current_price:.5f})")
+            logger.debug(f"🔍 Analyse: {len(data)} points (prix: {self.current_price:.5f})")
 
-            # 🆕 NOUVEAU: Envoyer données de prix au dashboard (throttlé automatiquement)
+            # Envoyer prix au dashboard (throttlé)
+            if self.dashboard:
+                await self._update_dashboard_price(data)
+
+            # 📊 Analyse technique
+            tech_score = self.technical_analysis.calculate_score(data)
+            logger.debug(f"📊 Score technique: {tech_score}")
+
+            # 🧠 Prédiction IA
+            ai_prediction = self.ai_model.predict_ensemble(data)
+            self.ai_predictions_today += 1
+            logger.debug(f"🧠 IA: {ai_prediction}")
+
+            # 🎯 Génération signal Multi-Timeframes
+            signal = self.signal_generator.generate_signal(data, tech_score, ai_prediction)
+
+            if signal:
+                await self.process_signal(signal)
+            else:
+                self.mtf_rejections += 1
+                logger.debug("❌ Signal rejeté par filtres MTF")
+
+            # Mise à jour périodique dashboard
+            if self.dashboard:
+                await self._update_dashboard_metrics()
+
+        except Exception as e:
+            logger.error(f"❌ Erreur traitement données: {e}")
+
+    async def process_signal(self, signal: Dict):
+        """🎯 Traitement d'un signal validé"""
+        try:
+            direction = signal['direction']
+            entry_price = signal['entry_price']
+            signal_quality = signal.get('signal_quality', 'UNKNOWN')
+            confluence_score = signal.get('multi_timeframe', {}).get('confluence_score', 0)
+
+            logger.info(f"🎯 SIGNAL MTF GÉNÉRÉ:")
+            logger.info(f"   📊 {direction} à {entry_price:.5f}")
+            logger.info(f"   🏆 Qualité: {signal_quality}")
+            logger.info(f"   📈 Confluence: {confluence_score:.1%}")
+
+            # Mettre à jour statistiques
+            self._update_signal_stats(signal)
+
+            # 📱 Envoyer notification Telegram
+            await self.telegram_bot.send_signal(signal)
+
+            # 📊 Envoyer au dashboard
+            if self.dashboard:
+                await self.dashboard.send_signal(signal)
+
+            # Sauvegarder signal
+            self._save_signal(signal)
+
+            # Mise à jour compteurs
+            self.last_signal_time = time.time()
+            self.daily_trades += 1
+            self.signals_today += 1
+            self.last_signal_time_obj = datetime.now()
+
+            logger.info(
+                f"📊 Stats session: Signaux={self.signals_today}, Premium={self.premium_signals}, Rejets={self.mtf_rejections}")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur traitement signal: {e}")
+
+    def _update_signal_stats(self, signal: Dict):
+        """Mettre à jour les statistiques des signaux"""
+        try:
+            signal_quality = signal.get('signal_quality', 'UNKNOWN')
+
+            if signal_quality == 'PREMIUM':
+                self.premium_signals += 1
+            elif signal_quality in ['HIGH', 'GOOD']:
+                self.high_quality_signals += 1
+
+        except Exception as e:
+            logger.error(f"❌ Erreur mise à jour stats: {e}")
+
+    async def _update_dashboard_price(self, data: pd.DataFrame):
+        """Mettre à jour les prix sur le dashboard (throttlé)"""
+        try:
             current_time = time.time()
             if current_time - self._last_price_update > 30:  # Toutes les 30 secondes
                 price_data = {
@@ -370,288 +397,58 @@ class OptimizedTradingBotMTF:
                 await self.dashboard.send_price_data(price_data)
                 self._last_price_update = current_time
 
-            # 📊 Analyse technique
-            tech_score = self.technical_analysis.calculate_score(data)
-            logger.debug(f"📊 Score technique: {tech_score}")
+        except Exception as e:
+            logger.debug(f"Erreur update prix dashboard: {e}")
 
-            # 🧠 Prédiction IA OPTIMISÉE
-            ai_prediction = self.ai_model.predict_ensemble(data)
-            self.ai_predictions_today += 1
-            logger.debug(f"🧠 IA optimisée: {ai_prediction}")
-
-            # 🎯 Génération signal MULTI-TIMEFRAMES
-            signal = self.signal_generator.generate_signal(data, tech_score, ai_prediction)
-
-            if signal:
-                await self.process_optimized_signal_mtf(signal)
-            else:
-                self.mtf_rejections += 1
-                logger.debug("❌ Signal rejeté par filtres MTF")
-
-            # 🆕 NOUVEAU: Mise à jour périodique des métriques dashboard
+    async def _update_dashboard_metrics(self):
+        """Mettre à jour les métriques dashboard (throttlé)"""
+        try:
+            current_time = time.time()
             if current_time - self._last_metrics_update > 300:  # Toutes les 5 minutes
-                await self._send_metrics_update()
+                uptime = (datetime.now() - self.start_time).total_seconds() / 3600
+                model_info = self.ai_model.get_ensemble_model_info()
+
+                metrics = {
+                    'bot_status': 'RUNNING',
+                    'deriv_connected': getattr(self.deriv_api, 'connected', True),
+                    'telegram_connected': True,
+                    'signals_today': self.signals_today,
+                    'mtf_rejections': self.mtf_rejections,
+                    'ai_accuracy': model_info.get('validation_accuracy', 0),
+                    'uptime_hours': uptime,
+                    'premium_signals': self.premium_signals,
+                    'high_quality_signals': self.high_quality_signals
+                }
+
+                await self.dashboard.send_system_metrics(metrics)
                 self._last_metrics_update = current_time
 
-            # 🚨 Détection d'alertes MTF spéciales
-            await self.check_mtf_special_conditions(data, tech_score, ai_prediction)
-
         except Exception as e:
-            logger.error(f"Erreur traitement optimisé MTF: {e}")
+            logger.debug(f"Erreur update métriques dashboard: {e}")
 
-    async def process_optimized_signal_mtf(self, signal):
-        """🚀 Traitement du signal optimisé MTF + Dashboard"""
+    async def send_health_notification(self):
+        """📱 Notification de santé MTF"""
         try:
-            direction = signal['direction']
-            entry_price = signal['entry_price']
-            combined_score = signal['combined_score']
-
-            # 🆕 Statistiques MTF de qualité
-            signal_quality = signal.get('signal_quality', 'UNKNOWN')
-            mtf_info = signal.get('multi_timeframe', {})
-            confluence_score = mtf_info.get('confluence_score', 0)
-
-            logger.info(f"🎯 Signal OPTIMISÉ MTF généré:")
-            logger.info(f"   📊 {direction} à {entry_price:.5f}")
-            logger.info(f"   🏆 Qualité: {signal_quality}")
-            logger.info(f"   📈 Confluence: {confluence_score:.1%}")
-            logger.info(f"   🎯 Score: {combined_score:.1f}/100")
-
-            # 🆕 Statistiques MTF avancées
-            self._update_mtf_stats(signal)
-
-            # Compteurs par qualité
-            if signal_quality == 'PREMIUM':
-                self.premium_signals += 1
-            elif signal_quality in ['HIGH', 'GOOD']:
-                self.high_quality_signals += 1
-
-            # 📱 Envoyer notification Telegram MTF COMPLÈTE
-            await self.telegram_bot.send_signal(signal)
-
-            # 🆕 NOUVEAU: Envoyer signal au dashboard
-            await self.dashboard.send_signal(signal)
-
-            # Mise à jour compteurs
-            self.last_signal_time = time.time()
-            self.daily_trades += 1
-            self.signals_today += 1
-            self.last_signal_time_obj = datetime.now()
-
-            # Sauvegarder signal optimisé MTF
-            self._save_optimized_signal_mtf(signal)
-
-            # Log de performance MTF
-            logger.info(f"📊 Statistiques session MTF:")
-            logger.info(f"   🎯 Signaux totaux: {self.signals_today}")
-            logger.info(f"   🏆 Premium: {self.premium_signals}")
-            logger.info(f"   📈 Haute qualité: {self.high_quality_signals}")
-            logger.info(f"   ❌ Rejets MTF: {self.mtf_rejections}")
-            logger.info(f"   📊 Confluence moy: {self.daily_mtf_stats['avg_confluence']:.1%}")
-
-        except Exception as e:
-            logger.error(f"Erreur traitement signal optimisé MTF: {e}")
-
-    async def _send_metrics_update(self):
-        """🆕 Envoyer mise à jour des métriques au dashboard"""
-        try:
+            # Statistiques actuelles
             uptime = (datetime.now() - self.start_time).total_seconds() / 3600
             model_info = self.ai_model.get_ensemble_model_info()
 
-            metrics = {
-                'bot_status': 'RUNNING',
-                'deriv_connected': getattr(self.deriv_api, 'connected', True),
-                'telegram_connected': True,
-                'signals_today': self.signals_today,
-                'mtf_rejections': self.mtf_rejections,
-                'ai_accuracy': model_info.get('validation_accuracy', 0),
-                'uptime_hours': uptime,
-                'premium_signals': self.premium_signals,
-                'high_quality_signals': self.high_quality_signals
-            }
-
-            await self.dashboard.send_system_metrics(metrics)
-            logger.debug("📊 Métriques dashboard mises à jour")
-
-        except Exception as e:
-            logger.error(f"Erreur envoi métriques dashboard: {e}")
-
-    async def _send_full_metrics_update(self, ai_info: Dict):
-        """🆕 Envoyer métriques complètes d'initialisation"""
-        try:
-            metrics = {
-                'bot_status': 'RUNNING',
-                'deriv_connected': getattr(self.deriv_api, 'connected', True),
-                'telegram_connected': True,
-                'signals_today': 0,
-                'mtf_rejections': 0,
-                'ai_accuracy': ai_info.get('validation_accuracy', 0),
-                'uptime_hours': 0,
-                'premium_signals': 0,
-                'high_quality_signals': 0
-            }
-
-            await self.dashboard.send_system_metrics(metrics)
-            logger.info("📊 Métriques complètes envoyées au dashboard")
-
-        except Exception as e:
-            logger.error(f"Erreur envoi métriques complètes: {e}")
-
-    def _update_mtf_stats(self, signal):
-        """🆕 Mise à jour des statistiques MTF"""
-        try:
-            mtf_info = signal.get('multi_timeframe', {})
-            confluence_score = mtf_info.get('confluence_score', 0)
-
-            # Ajouter le score de confluence
-            self.daily_mtf_stats['confluence_scores'].append(confluence_score)
-
-            # Calculer moyenne et meilleur
-            if self.daily_mtf_stats['confluence_scores']:
-                self.daily_mtf_stats['avg_confluence'] = sum(self.daily_mtf_stats['confluence_scores']) / len(
-                    self.daily_mtf_stats['confluence_scores'])
-                self.daily_mtf_stats['best_confluence'] = max(self.daily_mtf_stats['confluence_scores'])
-
-            # Compter les signaux par timeframe dominants
-            timeframes_detail = mtf_info.get('timeframes_detail', {})
-            if timeframes_detail:
-                # Déterminer le timeframe le plus fort
-                strongest_tf = None
-                max_strength = 0
-
-                for tf_name, tf_data in timeframes_detail.items():
-                    tf_strength = tf_data.get('strength', 0)
-                    if isinstance(tf_strength, (int, float)) and tf_strength > max_strength:
-                        max_strength = tf_strength
-                        strongest_tf = tf_name
-
-                # Incrémenter le compteur du timeframe dominant
-                if strongest_tf:
-                    key = f"{strongest_tf.lower()}_signals"
-                    if key in self.daily_mtf_stats:
-                        self.daily_mtf_stats[key] += 1
-
-        except Exception as e:
-            logger.error(f"Erreur mise à jour stats MTF: {e}")
-
-    async def check_mtf_special_conditions(self, data, tech_score, ai_prediction):
-        """🚨 Vérification des conditions spéciales MTF"""
-        try:
-            # Ne vérifier que si pas de signal récent
-            if time.time() - self.last_signal_time < 1800:  # 30 minutes
-                return
-
-            # Analyse MTF pour détection d'alertes
-            from multi_timeframe_analysis import MultiTimeframeAnalysis
-            mtf_analyzer = MultiTimeframeAnalysis()
-
-            mtf_result = mtf_analyzer.multi_timeframe_analysis(data)
-            if not mtf_result:
-                return
-
-            confluence_score = mtf_result.get('confluence_score', 0)
-
-            # Confluence très élevée sans signal (divergence technique/IA)
-            if confluence_score >= 0.85 and tech_score < 70:
-                alert_data = {
-                    'type': 'high_confluence',
-                    'confluence_score': confluence_score,
-                    'direction': mtf_result.get('direction', 'N/A'),
-                    'strength': mtf_result.get('strength', 'unknown'),
-                    'timeframes': mtf_result.get('timeframes', {})
-                }
-                await self.telegram_bot.send_mtf_analysis_alert(alert_data)
-
-            # Divergence entre timeframes
-            timeframes = mtf_result.get('timeframes', {})
-            if len(timeframes) >= 3:
-                directions = [tf.get('direction') for tf in timeframes.values() if tf.get('direction')]
-                unique_directions = set(directions)
-
-                if len(unique_directions) >= 2:  # Directions contradictoires
-                    alert_data = {
-                        'type': 'divergence',
-                        'confluence_score': confluence_score,
-                        'direction': 'DIVERGENT',
-                        'strength': 'conflict',
-                        'timeframes': timeframes
-                    }
-                    await self.telegram_bot.send_mtf_analysis_alert(alert_data)
-
-        except Exception as e:
-            logger.debug(f"Erreur vérification conditions spéciales MTF: {e}")
-
-    def _save_optimized_signal_mtf(self, signal):
-        """💾 Sauvegarde signal optimisé MTF"""
-        try:
-            import csv
-            os.makedirs('data', exist_ok=True)
-
-            csv_file = 'data/optimized_signals_mtf.csv'
-            file_exists = os.path.exists(csv_file)
-
-            # Aplatir les données MTF pour CSV
-            flattened_signal = signal.copy()
-            mtf_data = flattened_signal.pop('multi_timeframe', {})
-
-            # Ajouter les données MTF aplaties
-            flattened_signal['mtf_confluence_score'] = mtf_data.get('confluence_score', 0)
-            flattened_signal['mtf_confluence_percentage'] = mtf_data.get('confluence_percentage', 0)
-            flattened_signal['mtf_strength'] = mtf_data.get('strength', 'unknown')
-            flattened_signal['mtf_direction'] = mtf_data.get('direction', 'unknown')
-
-            # Détails par timeframe
-            timeframes_detail = mtf_data.get('timeframes_detail', {})
-            for tf_name in ['H1', 'M15', 'M5']:
-                if tf_name in timeframes_detail:
-                    tf_data = timeframes_detail[tf_name]
-                    flattened_signal[f'mtf_{tf_name.lower()}_direction'] = tf_data.get('direction', 'N/A')
-                    flattened_signal[f'mtf_{tf_name.lower()}_score'] = tf_data.get('score', 0)
-                    flattened_signal[f'mtf_{tf_name.lower()}_strength'] = tf_data.get('strength', 0)
-                    flattened_signal[f'mtf_{tf_name.lower()}_trend'] = tf_data.get('trend', 'unknown')
-
-            with open(csv_file, 'a', newline='', encoding='utf-8') as f:
-                writer = csv.DictWriter(f, fieldnames=flattened_signal.keys())
-
-                if not file_exists:
-                    writer.writeheader()
-
-                writer.writerow(flattened_signal)
-
-        except Exception as e:
-            logger.error(f"Erreur sauvegarde signal optimisé MTF: {e}")
-
-    async def send_mtf_health_notification(self):
-        """📱 Notification de santé optimisée MTF + Dashboard"""
-        try:
-            # Récupérer données actuelles
-            data = await self.deriv_api.get_latest_data(count=2000)
-            price_change_1h = 0
-
-            if data is not None and len(data) > 0:
-                self.current_price = float(data['price'].iloc[-1])
-
-                if len(data) >= 12:
-                    price_1h_ago = float(data['price'].iloc[-13])
-                    price_change_1h = ((self.current_price - price_1h_ago) / price_1h_ago) * 100
-
-            # Stats du bot optimisé MTF
-            uptime = (datetime.now() - self.start_time).total_seconds() / 3600
-            model_info = self.ai_model.get_ensemble_model_info()
-
-            # Taux de rejet MTF
+            # Calculs statistiques
             total_analyses = self.ai_predictions_today
             mtf_rejection_rate = (self.mtf_rejections / total_analyses * 100) if total_analyses > 0 else 0
-
-            # Statistiques de qualité
             quality_signals = self.premium_signals + self.high_quality_signals
             quality_rate = (quality_signals / self.signals_today * 100) if self.signals_today > 0 else 0
+
+            # Variation de prix
+            data = await self.deriv_api.get_latest_data(count=12)  # ~1h de données
+            price_change_1h = 0
+            if data is not None and len(data) >= 12:
+                price_1h_ago = float(data['price'].iloc[0])
+                price_change_1h = ((self.current_price - price_1h_ago) / price_1h_ago) * 100
 
             bot_stats = {
                 'connected': getattr(self.deriv_api, 'connected', True),
                 'uptime_hours': uptime,
-                'data_points': len(getattr(self.deriv_api, 'data_buffer', [])),
-                'ai_mode': f"{model_info.get('model_type', 'Simple')} ({model_info.get('n_features', 0)} features)",
                 'ai_accuracy': model_info.get('validation_accuracy', 0),
                 'signals_today': self.signals_today,
                 'premium_signals': self.premium_signals,
@@ -663,215 +460,157 @@ class OptimizedTradingBotMTF:
                 'current_price': self.current_price,
                 'price_change_1h': price_change_1h,
                 'trading_mode': os.getenv('TRADING_MODE', 'demo'),
-                'min_confluence': float(os.getenv('MIN_CONFLUENCE_SCORE', 0.65)) * 100
+                'min_confluence': float(os.getenv('MIN_CONFLUENCE_SCORE', 0.55)) * 100
             }
 
-            # Envoyer à Telegram
             success = await self.telegram_bot.send_mtf_health_notification(bot_stats)
-
-            # 🆕 NOUVEAU: Envoyer métriques au dashboard
-            await self.dashboard.send_system_metrics({
-                'bot_status': 'RUNNING',
-                'deriv_connected': bot_stats['connected'],
-                'telegram_connected': True,
-                'signals_today': self.signals_today,
-                'mtf_rejections': self.mtf_rejections,
-                'ai_accuracy': model_info.get('validation_accuracy', 0),
-                'uptime_hours': uptime,
-                'premium_signals': self.premium_signals,
-                'high_quality_signals': self.high_quality_signals
-            })
 
             if success:
                 logger.info("📱 Notification de santé MTF envoyée")
-            else:
-                logger.warning("⚠️ Échec envoi notification de santé MTF")
 
         except Exception as e:
-            logger.error(f"Erreur notification santé MTF: {e}")
+            logger.error(f"❌ Erreur notification santé: {e}")
 
-    def _is_trading_hours(self):
-        """Vérifier heures de trading"""
+    def _is_trading_hours(self) -> bool:
+        """Vérifier les heures de trading"""
         current_hour = datetime.now(timezone.utc).hour
+        # Éviter les heures de faible liquidité (22h-6h UTC)
         return not (22 <= current_hour or current_hour < 6)
 
     def _reset_daily_counter(self):
-        """Reset compteur journalier optimisé MTF"""
+        """Reset compteur journalier"""
         today = datetime.now().date()
         if self.last_trade_date != today:
             if self.signals_today > 0:
-                logger.info(f"📅 Fin de journée OPTIMISÉE MTF - Stats:")
-                logger.info(f"   🎯 Signaux totaux: {self.signals_today}")
+                logger.info(f"📅 Fin de journée - Stats MTF:")
+                logger.info(f"   🎯 Signaux: {self.signals_today}")
                 logger.info(f"   🏆 Premium: {self.premium_signals}")
                 logger.info(f"   📈 Haute qualité: {self.high_quality_signals}")
                 logger.info(f"   ❌ Rejets MTF: {self.mtf_rejections}")
-                logger.info(f"   📊 Confluence moy: {self.daily_mtf_stats['avg_confluence']:.1%}")
 
-                # Envoyer résumé quotidien MTF
-                daily_summary_stats = {
-                    'total_signals': self.signals_today,
-                    'premium_signals': self.premium_signals,
-                    'high_quality_signals': self.high_quality_signals,
-                    'mtf_rejections': self.mtf_rejections,
-                    'avg_confluence_score': self.daily_mtf_stats['avg_confluence'],
-                    'best_confluence_score': self.daily_mtf_stats['best_confluence'],
-                    'h1_signals': self.daily_mtf_stats['h1_signals'],
-                    'm15_signals': self.daily_mtf_stats['m15_signals'],
-                    'm5_signals': self.daily_mtf_stats['m5_signals'],
-                    'win_rate': 0.75,  # Placeholder - à implémenter avec tracking réel
-                    'avg_rr_ratio': 3.2,  # Placeholder
-                    'realized_pnl': 0,  # Placeholder
-                    'uptime_hours': (datetime.now() - self.start_time).total_seconds() / 3600
-                }
-
-                asyncio.create_task(self.telegram_bot.send_mtf_daily_summary(daily_summary_stats))
-
-            # Reset tous les compteurs MTF
+            # Reset compteurs
             self.daily_trades = 0
             self.signals_today = 0
             self.premium_signals = 0
             self.high_quality_signals = 0
             self.mtf_rejections = 0
             self.ai_predictions_today = 0
-
-            # Reset stats MTF spécifiques
-            self.daily_mtf_stats = {
-                'confluence_scores': [],
-                'h1_signals': 0,
-                'm15_signals': 0,
-                'm5_signals': 0,
-                'avg_confluence': 0,
-                'best_confluence': 0
-            }
-
             self.last_trade_date = today
-            logger.info(f"📅 Nouveau jour - Reset compteurs optimisés MTF: {today}")
 
-    def _can_trade(self):
-        """Vérifier si on peut trader (optimisé MTF)"""
+    def _can_trade(self) -> bool:
+        """Vérifier si on peut trader"""
         current_time = time.time()
 
         # Intervalle minimum entre signaux
         if current_time - self.last_signal_time < self.signal_interval:
             return False
 
-        # Maximum de trades journaliers (réduit car plus sélectif avec MTF)
+        # Maximum de trades journaliers
         if self.daily_trades >= self.max_daily_trades:
-            logger.debug(f"Maximum trades optimisés MTF atteint: {self.daily_trades}")
             return False
 
         # Pertes consécutives
         if self.consecutive_losses >= self.max_consecutive_losses:
-            logger.warning(f"Maximum pertes consécutives: {self.consecutive_losses}")
             return False
 
         return True
 
-    async def cleanup_optimized_mtf(self):
-        """🧹 Nettoyage optimisé MTF avant arrêt + Dashboard"""
+    def _save_signal(self, signal: Dict):
+        """Sauvegarder le signal en CSV"""
         try:
-            logger.info("🧹 Nettoyage optimisé MTF + Dashboard avant arrêt...")
+            import csv
+            os.makedirs('data', exist_ok=True)
 
-            # 🆕 NOUVEAU: Envoyer statut d'arrêt au dashboard
-            try:
-                await self.dashboard.send_system_metrics({
-                    'bot_status': 'STOPPED',
-                    'deriv_connected': False,
-                    'telegram_connected': False,
-                    'signals_today': self.signals_today,
-                    'mtf_rejections': self.mtf_rejections,
-                    'ai_accuracy': 0,
-                    'uptime_hours': (datetime.now() - self.start_time).total_seconds() / 3600
-                })
-            except Exception as e:
-                logger.debug(f"Erreur envoi statut arrêt dashboard: {e}")
+            csv_file = 'data/signals_mtf.csv'
+            file_exists = os.path.exists(csv_file)
 
-            # Statistiques finales optimisées MTF
-            if self.signals_today > 0:
-                uptime = (datetime.now() - self.start_time).total_seconds() / 3600
-                model_info = self.ai_model.get_ensemble_model_info()
+            # Aplatir les données pour CSV
+            flat_signal = {
+                'timestamp': signal['timestamp'],
+                'direction': signal['direction'],
+                'entry_price': signal['entry_price'],
+                'stop_loss': signal['stop_loss'],
+                'take_profit': signal['take_profit'],
+                'tech_score': signal['tech_score'],
+                'ai_confidence': signal['ai_confidence'],
+                'combined_score': signal['combined_score'],
+                'signal_quality': signal['signal_quality'],
+                'confluence_score': signal.get('multi_timeframe', {}).get('confluence_score', 0),
+                'mtf_strength': signal.get('multi_timeframe', {}).get('strength', 'unknown')
+            }
 
-                final_stats = f"""
-🛑 <b>Bot Vol75 OPTIMISÉ MTF + Dashboard arrêté</b>
-
-📊 <b>Session terminée:</b>
-• Durée: {uptime:.1f}h
-• Signaux générés: {self.signals_today}
-• 🏆 Premium: {self.premium_signals}
-• 📈 Haute qualité: {self.high_quality_signals}
-• ❌ Rejets MTF: {self.mtf_rejections}
-• Dernier prix: {self.current_price:.5f}
-
-🎯 <b>Multi-Timeframes:</b>
-• Confluence moyenne: {self.daily_mtf_stats['avg_confluence']:.1%}
-• Meilleure confluence: {self.daily_mtf_stats['best_confluence']:.1%}
-• H1 signaux: {self.daily_mtf_stats['h1_signals']}
-• M15 signaux: {self.daily_mtf_stats['m15_signals']}
-• M5 signaux: {self.daily_mtf_stats['m5_signals']}
-
-🧠 <b>IA Optimisée:</b>
-• Type: {model_info.get('model_type', 'XGBoost')}
-• Features: {model_info.get('n_features', 0)}
-• Précision: {model_info.get('validation_accuracy', 0):.1%}
-
-📱 <b>Communication:</b>
-• Messages Telegram: {self.telegram_bot.messages_sent}
-• Taux succès: {self.telegram_bot.get_success_rate():.0f}%
-
-📊 <b>Dashboard:</b>
-• Status: {'✅ Connecté' if self.dashboard.enabled else '❌ Désactivé'}
-• Messages envoyés: ✅
-
-🕐 <i>Arrêté le {datetime.now().strftime('%d/%m/%Y à %H:%M:%S')}</i>
-
-🚀 <b>Merci d'avoir utilisé le Bot MTF OPTIMISÉ + Dashboard!</b>
-"""
-                await self.telegram_bot.send_message(final_stats)
-            else:
-                await self.telegram_bot.send_shutdown_message()
-
-            # Fermer connexion Deriv
-            await self.deriv_api.disconnect()
-            logger.info("✅ Nettoyage optimisé MTF + Dashboard terminé")
+            with open(csv_file, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.DictWriter(f, fieldnames=flat_signal.keys())
+                if not file_exists:
+                    writer.writeheader()
+                writer.writerow(flat_signal)
 
         except Exception as e:
-            logger.error(f"Erreur nettoyage optimisé MTF: {e}")
+            logger.error(f"❌ Erreur sauvegarde signal: {e}")
+
+    async def cleanup(self):
+        """🧹 Nettoyage avant arrêt"""
+        try:
+            logger.info("🧹 Nettoyage avant arrêt...")
+
+            # Statistiques finales
+            uptime = (datetime.now() - self.start_time).total_seconds() / 3600
+
+            final_stats = {
+                'uptime_hours': uptime,
+                'signals_today': self.signals_today,
+                'premium_signals': self.premium_signals,
+                'mtf_rejections': self.mtf_rejections
+            }
+
+            # Notifications d'arrêt
+            if self.signals_today > 0:
+                await self.telegram_bot.send_mtf_daily_summary(final_stats)
+
+            await self.telegram_bot.send_shutdown_message()
+
+            # Dashboard
+            if self.dashboard:
+                await self.dashboard.send_shutdown_notification(final_stats)
+
+            # Fermer connexions
+            await self.deriv_api.disconnect()
+
+            logger.info("✅ Nettoyage terminé")
+
+        except Exception as e:
+            logger.error(f"❌ Erreur nettoyage: {e}")
 
 
 def main():
-    """🚀 Point d'entrée principal OPTIMISÉ MTF + Dashboard"""
+    """🚀 Point d'entrée principal"""
     setup_logging()
 
     logger.info("=" * 80)
-    logger.info("BOT TRADING VOL75 OPTIMISÉ MTF + DASHBOARD - DÉMARRAGE")
-    logger.info("Version: 3.1 - IA Optimisée + Multi-Timeframes + Telegram + Dashboard")
-    logger.info("🚀 Nouvelles fonctionnalités:")
-    logger.info("   • 45+ features IA optimisées")
+    logger.info("BOT TRADING VOL75 OPTIMISÉ MTF - DÉMARRAGE")
+    logger.info("Version: 3.1 - RECONSTRUCTION COMPLÈTE")
+    logger.info("🚀 Fonctionnalités:")
+    logger.info("   • IA Ensemble XGBoost + LightGBM optimisée")
     logger.info("   • Analyse Multi-Timeframes M5/M15/H1")
-    logger.info("   • Notifications Telegram détaillées MTF")
-    logger.info("   • Dashboard temps réel avec API + Interface web")
+    logger.info("   • Notifications Telegram détaillées")
+    logger.info("   • Dashboard temps réel")
     logger.info("   • Confluence scoring avancé")
-    logger.info("   • Alertes spéciales MTF")
     logger.info("=" * 80)
 
-    # Créer et lancer le bot optimisé MTF + Dashboard
+    # Créer et lancer le bot
     bot = OptimizedTradingBotMTF()
 
     try:
         asyncio.run(bot.run())
     except KeyboardInterrupt:
-        logger.info("Arrêt bot optimisé MTF demandé par l'utilisateur")
+        logger.info("Arrêt bot demandé par l'utilisateur")
     except Exception as e:
-        logger.error(f"Erreur fatale bot optimisé MTF: {e}")
+        logger.error(f"❌ Erreur fatale: {e}")
         sys.exit(1)
     finally:
         logger.info("=" * 80)
-        logger.info("BOT TRADING VOL75 OPTIMISÉ MTF + DASHBOARD - ARRÊTÉ")
-        logger.info("🚀 Merci d'avoir utilisé la version MTF + Dashboard optimisée!")
-        logger.info("   📊 Analyses Multi-Timeframes complètes")
-        logger.info("   📱 Notifications Telegram détaillées")
-        logger.info("   🌐 Dashboard temps réel accessible")
-        logger.info("   🎯 Sélectivité maximale des signaux")
+        logger.info("BOT TRADING VOL75 OPTIMISÉ MTF - ARRÊTÉ")
+        logger.info("🚀 Session terminée")
         logger.info("=" * 80)
 
 
